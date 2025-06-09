@@ -370,7 +370,8 @@ class YouTubeService:
         strategies = [
             self._fetch_transcript_with_retries,
             self._fetch_transcript_with_proxy_headers,
-            self._fetch_transcript_basic
+            self._fetch_transcript_basic,
+            self._fetch_transcript_timedtext
         ]
         
         for i, strategy in enumerate(strategies, 1):
@@ -387,6 +388,47 @@ class YouTubeService:
                 continue
         
         logger.error(f"All transcript fetch strategies failed for {video_id}")
+        return None
+
+    async def _fetch_transcript_timedtext(self, video_id: str) -> Optional[VideoTranscript]:
+        """Fetch transcript using the public timedtext endpoint as a last resort"""
+        import requests
+        import xml.etree.ElementTree as ET
+        import html
+
+        languages = ['en', 'en-US', 'en-GB']
+        for lang in languages:
+            try:
+                url = f"https://video.google.com/timedtext?lang={lang}&v={video_id}"
+                logger.debug(f"Attempting timedtext fetch for {video_id} using {lang}")
+                resp = requests.get(url, timeout=10)
+                if resp.status_code != 200 or not resp.text.strip():
+                    continue
+
+                root = ET.fromstring(resp.text)
+                segments = []
+                full_text_parts = []
+                for elem in root.findall('text'):
+                    start = float(elem.attrib.get('start', '0'))
+                    dur = float(elem.attrib.get('dur', '0'))
+                    text = html.unescape(elem.text or '')
+                    segment = TranscriptSegment(start_time=start, duration=dur, text=text)
+                    segments.append(segment)
+                    full_text_parts.append(text)
+
+                full_text = ' '.join(full_text_parts).strip()
+                if full_text:
+                    logger.info(f"Fetched transcript for {video_id} via timedtext")
+                    return VideoTranscript(
+                        video_id=video_id,
+                        language=lang,
+                        segments=segments,
+                        full_text=full_text,
+                    )
+            except Exception as e:
+                logger.debug(f"Timedtext fetch failed for {video_id} lang {lang}: {e}")
+                continue
+
         return None
     
     async def _fetch_transcript_with_retries(self, video_id: str) -> Optional[VideoTranscript]:
