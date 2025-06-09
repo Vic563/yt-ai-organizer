@@ -170,24 +170,18 @@ class ChatHandler:
             else:
                 response_text = f"I found {len(video_recommendations)} videos that might be relevant to your query about '{query}':"
             
-            # Add follow-up suggestions
-            if len(video_recommendations) > 1:
-                response_text += "\n\nWould you like me to help you compare these videos or explain something specific from any of them?"
-            else:
-                response_text += "\n\nWould you like me to summarize this video or explain something specific from it?"
+            # Previously the assistant appended follow-up suggestions asking the
+            # user if they wanted comparisons or summaries. These suggestions
+            # were removed to keep responses concise and avoid interrupting the
+            # user's flow.
                 
         else:
             response_text = f"I couldn't find any videos related to '{query}' in your library. "
             
-            # Provide more helpful suggestions based on context
-            if context and context.get('entities'):
-                response_text += f"\n\nTry searching for a different aspect of {', '.join(context['entities'])} or let me know if you'd like to add new videos on this topic."
-            else:
-                response_text += "\n\nYou might want to try different search terms or let me know if you'd like to add new videos on this topic."
-            
-            # If this was a follow-up, suggest alternative approaches
-            if context and context.get('follow_up'):
-                response_text += "\n\nWould you like to try rephrasing your question or searching for something else?"
+            # Previously additional suggestions were appended when no videos
+            # were found. These prompts encouraged rephrasing the query or
+            # adding new videos. They have been removed to allow the user to
+            # decide the next step without unsolicited guidance.
         
         return ChatResponse(
             message=response_text,
@@ -285,7 +279,9 @@ class ChatHandler:
             message += "• The topic isn't covered in your videos\n"
             message += "• The videos might use different terminology\n"
             message += "• The videos might not have transcripts available\n\n"
-            message += "Would you like to try a different search or check if you have videos on this topic?"
+            # The previous version prompted the user to try a different search.
+            # This suggestion has been removed to keep the response focused on
+            # the current query.
             
             return ChatResponse(
                 message=message,
@@ -322,11 +318,9 @@ Please provide a detailed answer using the information from these videos. If you
                 for i, citation in enumerate(citations, 1):
                     response_text += f"\n{i}. {citation.title} - {self._format_video_url(citation.video_id, citation.timestamp)}"
             
-            # Add helpful follow-up
-            if citations:
-                response_text += "\n\nI've referenced information from your video library above. Would you like me to find more specific details about any particular aspect?"
-            else:
-                response_text += "\n\nI've searched through your available video transcripts. If you'd like me to look for videos on this topic, just ask!"
+            # Previous versions appended follow-up prompts offering additional
+            # searches or details. These have been removed to avoid cluttering
+            # the assistant's response with unsolicited suggestions.
             
             return ChatResponse(
                 message=response_text,
@@ -355,7 +349,7 @@ Please provide a detailed answer using the information from these videos. If you
                 )
             else:
                 return ChatResponse(
-                    message=f"I'm sorry, but I couldn't find any videos related to '{effective_query}' in your library. Would you like me to help you search for relevant videos to add?",
+                    message=f"I'm sorry, but I couldn't find any videos related to '{effective_query}' in your library.",
                     type="synthesis",
                     context=context
                 )
