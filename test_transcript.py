@@ -81,28 +81,5 @@ async def test_transcript_fetch():
     else:
         logger.error("MAIN METHOD FAILED: No transcript returned")
 
-<input
-  ref={inputRef}
-  type="text"
-  value={inputMessage}
-  onChange={(e) => setInputMessage(e.target.value)}
-  placeholder="Ask me about your YouTube library or just say hello..."
-  className="chat-input"
-/>
-
-<button
-  type="submit"
-  disabled={!inputMessage.trim() || isLoading}  // Keep this disabled check
-  className="send-button"
->
-  <Send size={20} />
-</button>
-
-const handleSubmit = async (e) => {
-  e.preventDefault()
-  if (!inputMessage.trim() || isLoading) return  // This check remains important
-  // ... rest of the function
-}
-
 if __name__ == "__main__":
     asyncio.run(test_transcript_fetch())

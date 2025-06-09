@@ -117,6 +117,7 @@ The AI maintains conversation context:
 - [x] Conversational chat interface
 - [x] YouTube library synchronization
 - [x] Video transcript fetching and storage
+- [x] Extra fallback transcript retrieval using the public timedtext endpoint
 - [x] AI-powered video discovery
 - [x] Question answering with citations
 - [x] Configuration management
