@@ -148,3 +148,6 @@ venv.bak/
 
 # Cascade specific
 .github/chatmodes/
+
+# Claude AI files
+CLAUDE.md
