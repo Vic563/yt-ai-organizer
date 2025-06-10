@@ -24,8 +24,8 @@
 
 .topic-selector input[type="text"]:focus {
   outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 1px #3b82f6;
+  border-color: #10b981;
+  box-shadow: 0 0 0 1px #10b981;
 }
 
 .suggestions-dropdown {
@@ -310,7 +310,7 @@
 }
 
 .btn-edit:hover {
-  color: #3b82f6;
+  color: #10b981;
   background-color: #f3f4f6;
 }
 
@@ -335,8 +335,8 @@
 
 .topic-edit-input:focus {
   outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 1px #3b82f6;
+  border-color: #10b981;
+  box-shadow: 0 0 0 1px #10b981;
 }
 
 .topic-edit-actions {

@@ -90,7 +90,7 @@ function App() {
             Configure API Keys
           </button>
         </div>
-        <footer style={{ textAlign: 'center', padding: '10px', fontSize: '0.8em', color: 'grey' }}>Created by Victor R</footer>
+        <footer style={{ textAlign: 'center', padding: '10px', fontSize: '0.8em', color: 'grey' }}>Created by Victor Reyes</footer>
       </div>
     )
   }
@@ -184,7 +184,7 @@ function App() {
           } />
         </Routes>
       </main>
-      <footer style={{ textAlign: 'center', padding: '20px', fontSize: '0.9em', color: 'var(--text-color-secondary)' }}>Created by Victor R</footer>
+      <footer style={{ textAlign: 'center', padding: '20px', fontSize: '0.9em', color: 'var(--text-color-secondary)' }}>Created by Victor Reyes</footer>
     </div>
   )
 }
