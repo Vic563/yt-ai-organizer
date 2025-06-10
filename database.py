@@ -6,6 +6,8 @@ from typing import List, Optional, Dict, Any
 
 from config import get_settings, ensure_data_directories
 from models import VideoMetadata
+from database_migrations import run_migrations
+from database_search import search_videos_safe
 
 logger = logging.getLogger(__name__)
 
@@ -131,112 +133,10 @@ def insert_video(video: VideoMetadata) -> bool:
         return False
 
 def get_videos_by_query(query: str, limit: int = 10) -> List[Dict[str, Any]]:
-    """Search videos by text query in title and description with improved relevance"""
+    """Search videos by text query in title and description with SQL injection protection"""
     try:
         with get_db_connection() as conn:
-            cursor = conn.cursor()
-
-            # Split query into individual words for better matching
-            # Filter out very short words and common stop words that cause false matches
-            stop_words = {
-                'i', 'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had',
-                'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'to',
-                'of', 'in', 'on', 'at', 'by', 'for', 'with', 'as', 'and', 'or', 'but', 'if', 'any',
-                'some', 'all', 'no', 'not', 'my', 'your', 'his', 'her', 'its', 'our', 'their', 'this',
-                'that', 'these', 'those', 'me', 'you', 'he', 'she', 'it', 'we', 'they', 'them', 'us',
-                'about', 'videos', 'video', 'watch', 'see', 'get', 'go', 'come', 'take', 'make', 'know',
-                'think', 'say', 'tell', 'ask', 'give', 'find', 'look', 'want', 'need', 'try', 'use',
-                'work', 'call', 'first', 'last', 'long', 'great', 'little', 'own', 'other', 'old', 'right',
-                'big', 'high', 'different', 'small', 'large', 'next', 'early', 'young', 'important', 'few',
-                'public', 'bad', 'same', 'able'
-            }
-            query_words = [
-                word.strip().lower().rstrip('?.,!;:')
-                for word in query.split()
-                if word.strip() and len(word.strip()) > 2 and word.strip().lower().rstrip('?.,!;:') not in stop_words
-            ]
-
-            if not query_words:
-                # If all words were filtered out, try the original query as a phrase
-                query_words = [query.lower().strip()]
-
-            # Build a more sophisticated search query
-            # First, try exact phrase match
-            exact_phrase = f"%{query.lower()}%"
-            cursor.execute("""
-                SELECT *,
-                       CASE
-                           WHEN LOWER(title) LIKE ? THEN 3
-                           WHEN LOWER(description) LIKE ? THEN 2
-                           ELSE 1
-                       END as relevance_score
-                FROM videos
-                WHERE LOWER(title) LIKE ? OR LOWER(description) LIKE ?
-                ORDER BY relevance_score DESC, published_at DESC
-                LIMIT ?
-            """, (exact_phrase, exact_phrase, exact_phrase, exact_phrase, limit))
-
-            exact_results = [dict(row) for row in cursor.fetchall()]
-
-            # If we have exact matches, return them
-            if exact_results:
-                return exact_results
-
-            # If no exact matches, try individual word matching
-            word_conditions = []
-            word_params = []
-
-            for word in query_words:
-                word_pattern = f"%{word}%"
-                word_conditions.append("(LOWER(title) LIKE ? OR LOWER(description) LIKE ?)")
-                word_params.extend([word_pattern, word_pattern])
-
-            if word_conditions:
-                word_query = f"""
-                    SELECT *,
-                           ({' + '.join(['(CASE WHEN LOWER(title) LIKE ? OR LOWER(description) LIKE ? THEN 1 ELSE 0 END)' for _ in query_words])}) as word_matches
-                    FROM videos
-                    WHERE {' OR '.join(word_conditions)}
-                    ORDER BY word_matches DESC, published_at DESC
-                    LIMIT ?
-                """
-
-                # Duplicate params for the CASE statements in SELECT
-                all_params = []
-                for word in query_words:
-                    word_pattern = f"%{word}%"
-                    all_params.extend([word_pattern, word_pattern])
-                all_params.extend(word_params)
-                all_params.append(limit)
-
-                cursor.execute(word_query, all_params)
-                word_results = [dict(row) for row in cursor.fetchall()]
-
-                # Filter out results with very low relevance
-                # Require at least 1 meaningful word match, and if there are multiple query words,
-                # require a higher threshold to avoid weak matches
-                min_matches = 1 if len(query_words) <= 2 else max(1, len(query_words) // 2)
-                filtered_results = [video for video in word_results if video.get('word_matches', 0) >= min_matches]
-
-                # Additional filter: if the query has specific meaningful terms (not just stop words),
-                # ensure we have some actual content relevance
-                if filtered_results and len(query_words) > 0:
-                    # Check if any of the query words appear in title (higher relevance)
-                    title_matches = []
-                    for video in filtered_results:
-                        title_lower = video['title'].lower()
-                        has_title_match = any(word in title_lower for word in query_words)
-                        if has_title_match:
-                            title_matches.append(video)
-
-                    # If we have title matches, prefer those; otherwise use all filtered results
-                    if title_matches:
-                        return title_matches
-
-                return filtered_results
-
-            return []
-
+            return search_videos_safe(conn, query, limit)
     except Exception as e:
         logger.error(f"Error searching videos: {e}")
         return []

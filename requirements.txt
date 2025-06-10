@@ -13,3 +13,23 @@ youtube-transcript-api==0.6.1
 requests==2.31.0
 yt-dlp==2024.5.27
 reportlab==4.0.7
+
+# Security
+pyjwt==2.8.0
+cryptography==41.0.7
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Performance
+sqlalchemy==2.0.23
+redis==5.0.1
+celery==5.3.4
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+
+# Monitoring
+prometheus-client==0.19.0
+sentry-sdk==1.39.1

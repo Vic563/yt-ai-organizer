@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { getToken, refreshAccessToken, clearAuth } from './auth'
 
 const API_BASE_URL = '/api'
 
@@ -8,6 +9,45 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 })
+
+// Add auth token to requests
+api.interceptors.request.use(
+  (config) => {
+    const token = getToken()
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => {
+    return Promise.reject(error)
+  }
+)
+
+// Handle token refresh on 401
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config
+    
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true
+      
+      try {
+        const newToken = await refreshAccessToken()
+        originalRequest.headers.Authorization = `Bearer ${newToken}`
+        return api(originalRequest)
+      } catch (refreshError) {
+        // Refresh failed, redirect to login
+        clearAuth()
+        window.location.href = '/login'
+        return Promise.reject(refreshError)
+      }
+    }
+    
+    return Promise.reject(error)
+  }
+)
 
 // Configuration endpoints
 export const checkConfiguration = async () => {

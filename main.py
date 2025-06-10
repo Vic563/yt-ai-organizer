@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any, Callable, Awaitable
 import os
@@ -18,6 +19,19 @@ from cost_api import router as cost_router
 from performance_middleware import performance_middleware
 from performance_api import router as performance_router
 
+# Import authentication and security modules
+from auth import (
+    UserCreate, UserLogin, UserResponse, Token,
+    login, register, logout, refresh,
+    get_current_user, get_current_active_user, get_admin_user
+)
+from security import encrypt_value, decrypt_value
+from middleware import (
+    ErrorHandlerMiddleware, LoggingMiddleware, 
+    AuthenticationMiddleware, RateLimitMiddleware
+)
+from exceptions import AppException, ConfigurationError
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,7 +46,8 @@ app = FastAPI(
     openapi_url="/api/openapi.json"
 )
 
-# Add CORS middleware
+# Add middleware in order (reverse order of execution)
+# CORS must be added first
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:3002"],  # React dev server
@@ -40,6 +55,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add custom middleware
+app.add_middleware(RateLimitMiddleware, calls=100, period=60)
+app.add_middleware(AuthenticationMiddleware)
+app.add_middleware(LoggingMiddleware)
+app.add_middleware(ErrorHandlerMiddleware)
 
 # Add performance monitoring middleware
 app.middleware("http")(performance_middleware)
@@ -74,13 +95,43 @@ async def startup_event():
     # Initialize database
     init_database()
     
+    # Run any pending migrations
+    from database import run_migrations
+    run_migrations()
+    
     # Initialize services if configured
     init_services()
     logger.info("Services initialized successfully")
 
-# Configuration endpoints
+# Authentication endpoints
+@app.post("/api/auth/register", response_model=UserResponse)
+async def register_user(user_data: UserCreate):
+    """Register a new user"""
+    return await register(user_data)
+
+@app.post("/api/auth/login", response_model=Token)
+async def login_user(form_data: OAuth2PasswordRequestForm = Depends()):
+    """Login with username and password"""
+    return await login(form_data)
+
+@app.post("/api/auth/logout")
+async def logout_user(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Logout current user"""
+    return await logout(current_user)
+
+@app.post("/api/auth/refresh", response_model=Token)
+async def refresh_token(refresh_token: str):
+    """Refresh access token"""
+    return await refresh(refresh_token)
+
+@app.get("/api/auth/me", response_model=UserResponse)
+async def get_me(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Get current user info"""
+    return UserResponse(**current_user)
+
+# Configuration endpoints (now protected)
 @app.get("/api/config/check")
-async def check_configuration():
+async def check_configuration(current_user: Dict[str, Any] = Depends(get_current_active_user)):
     """Check if the application is properly configured"""
     try:
         # Get fresh settings
@@ -104,59 +155,70 @@ async def check_configuration():
         raise HTTPException(status_code=500, detail="Failed to check configuration")
 
 @app.post("/api/config/update")
-async def update_configuration(config: ConfigUpdate):
-    """Update API configuration"""
+async def update_configuration(
+    config: ConfigUpdate,
+    current_user: Dict[str, Any] = Depends(get_admin_user)
+):
+    """Update API configuration (admin only)"""
     try:
-        logger.info(f"Received /api/config/update request")
-        logger.info(f"googleAiApiKey: {config.googleAiApiKey}")
-        logger.info(f"youtubeApiKey: {config.youtubeApiKey}")
-        logger.info(f"googleCloudProjectId: {config.googleCloudProjectId}")
-        env_path = ".env"
-        env_vars = {}
-        if os.path.exists(env_path):
-            with open(env_path, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and "=" in line and not line.startswith("#"):
-                        key, value = line.split("=", 1)
-                        env_vars[key.strip()] = value.strip()
+        logger.info(f"Admin user {current_user['username']} updating configuration")
         
-        # Update with new values if provided and valid
-        logger.info(f"Current env_vars before update: {env_vars}")
-        # Only update if a non-null, non-empty value is provided
+        # Get database connection
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Store encrypted API keys in database instead of .env file
+        updates = []
+        
         if config.googleAiApiKey and config.googleAiApiKey.strip():
-            env_vars["GOOGLE_AI_API_KEY"] = config.googleAiApiKey
-            logger.info("Updating GOOGLE_AI_API_KEY")
+            encrypted_key = encrypt_value(config.googleAiApiKey)
+            cursor.execute(
+                """INSERT OR REPLACE INTO encrypted_keys 
+                   (key_name, encrypted_value, created_by, updated_at) 
+                   VALUES (?, ?, ?, CURRENT_TIMESTAMP)""",
+                ("GOOGLE_AI_API_KEY", encrypted_key, current_user['id'])
+            )
+            updates.append("Google AI API Key")
+            
         if config.youtubeApiKey and config.youtubeApiKey.strip():
-            env_vars["YOUTUBE_API_KEY"] = config.youtubeApiKey
-            logger.info("Updating YOUTUBE_API_KEY")
+            encrypted_key = encrypt_value(config.youtubeApiKey)
+            cursor.execute(
+                """INSERT OR REPLACE INTO encrypted_keys 
+                   (key_name, encrypted_value, created_by, updated_at) 
+                   VALUES (?, ?, ?, CURRENT_TIMESTAMP)""",
+                ("YOUTUBE_API_KEY", encrypted_key, current_user['id'])
+            )
+            updates.append("YouTube API Key")
+            
         if config.googleCloudProjectId and config.googleCloudProjectId.strip():
-            env_vars["GOOGLE_CLOUD_PROJECT_ID"] = config.googleCloudProjectId
-            logger.info("Updating GOOGLE_CLOUD_PROJECT_ID")
-
-        logger.info(f"Attempting to write to .env. env_vars to be written: {env_vars}")
-        with open(env_path, "w") as f:
-            for key, value in env_vars.items():
-                f.write(f"{key}={value}\n")
+            # Project ID doesn't need encryption
+            cursor.execute(
+                """INSERT OR REPLACE INTO encrypted_keys 
+                   (key_name, encrypted_value, created_by, updated_at) 
+                   VALUES (?, ?, ?, CURRENT_TIMESTAMP)""",
+                ("GOOGLE_CLOUD_PROJECT_ID", config.googleCloudProjectId, current_user['id'])
+            )
+            updates.append("Google Cloud Project ID")
+        
+        conn.commit()
+        conn.close()
+        
+        # Update environment variables in memory for current session
+        if config.googleAiApiKey:
+            os.environ["GOOGLE_AI_API_KEY"] = config.googleAiApiKey
+        if config.youtubeApiKey:
+            os.environ["YOUTUBE_API_KEY"] = config.youtubeApiKey
+        if config.googleCloudProjectId:
+            os.environ["GOOGLE_CLOUD_PROJECT_ID"] = config.googleCloudProjectId
         
         # Clear the settings cache and reinitialize
         clear_settings_cache()
         
-        # Reinitialize settings
-        global settings, youtube_service, gemini_service, chat_handler
-        settings = get_settings()
-        
-        # Log the new settings to verify they were loaded
-        logger.info(f"New settings loaded - Google AI API Key: {'Set' if settings.google_ai_api_key else 'Not set'}")
-        logger.info(f"New settings loaded - YouTube API Key: {'Set' if settings.youtube_api_key else 'Not set'}")
-        logger.info(f"New settings loaded - Google Cloud Project ID: {settings.google_cloud_project_id or 'Not set'}")
-        
-        # Test the API keys by initializing services
+        # Reinitialize services
         init_services()
-        logger.info(".env file updated and services re-initialized.")
         
-        logger.info("Configuration updated and tested successfully")
-        return {"success": True, "message": "Configuration updated and services reinitialized"}
+        logger.info(f"Configuration updated: {', '.join(updates)}")
+        return {"success": True, "message": f"Configuration updated: {', '.join(updates)}"}
         
     except Exception as e:
         logger.error(f"Error updating configuration: {e}")
@@ -164,7 +226,10 @@ async def update_configuration(config: ConfigUpdate):
 
 # Video management endpoints
 @app.post("/api/videos/add")
-async def add_video(video_data: dict):
+async def add_video(
+    video_data: dict,
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
     """Add a video to the library by URL"""
     if not youtube_service:
         raise HTTPException(status_code=400, detail="YouTube service not configured")
@@ -183,7 +248,10 @@ async def add_video(video_data: dict):
         raise HTTPException(status_code=500, detail=f"Failed to add video: {str(e)}")
 
 @app.delete("/api/videos/{video_id}")
-async def remove_video(video_id: str):
+async def remove_video(
+    video_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
     """Remove a video from the library"""
     if not youtube_service:
         raise HTTPException(status_code=400, detail="YouTube service not configured")
@@ -198,7 +266,7 @@ async def remove_video(video_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to remove video: {str(e)}")
 
 @app.get("/api/videos")
-async def get_all_videos():
+async def get_all_videos(current_user: Dict[str, Any] = Depends(get_current_active_user)):
     """Get all videos in the library"""
     try:
         from database import get_all_videos
@@ -209,7 +277,10 @@ async def get_all_videos():
         raise HTTPException(status_code=500, detail=f"Failed to get videos: {str(e)}")
 
 @app.post("/api/videos/{video_id}/retry-transcript")
-async def retry_video_transcript(video_id: str):
+async def retry_video_transcript(
+    video_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
     """Retry fetching transcript for a specific video"""
     if not youtube_service:
         raise HTTPException(status_code=400, detail="YouTube service not configured")
@@ -227,7 +298,9 @@ async def retry_video_transcript(video_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to retry transcript fetch: {str(e)}")
 
 @app.post("/api/videos/retry-all-transcripts")
-async def retry_all_missing_transcripts():
+async def retry_all_missing_transcripts(
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
     """Retry fetching transcripts for all videos without transcripts"""
     if not youtube_service:
         raise HTTPException(status_code=400, detail="YouTube service not configured")
@@ -245,7 +318,7 @@ async def retry_all_missing_transcripts():
         raise HTTPException(status_code=500, detail=f"Failed to retry transcript fetches: {str(e)}")
 
 @app.get("/api/library/stats")
-async def get_library_stats():
+async def get_library_stats(current_user: Dict[str, Any] = Depends(get_current_active_user)):
     """Get library statistics"""
     try:
         with get_db_connection() as conn:
@@ -274,7 +347,7 @@ async def get_library_stats():
 
 # Topic endpoints
 @app.get("/api/topics")
-async def get_topics():
+async def get_topics(current_user: Dict[str, Any] = Depends(get_current_active_user)):
     """Get all available topics with video counts"""
     try:
         with get_db_connection() as conn:
@@ -286,7 +359,10 @@ async def get_topics():
         raise HTTPException(status_code=500, detail="Failed to fetch topics")
 
 @app.get("/api/topics/{topic_name}/videos")
-async def get_videos_by_topic(topic_name: str):
+async def get_videos_by_topic(
+    topic_name: str,
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
     """Get all videos for a specific topic"""
     try:
         with get_db_connection() as conn:
@@ -307,7 +383,11 @@ async def get_videos_by_topic(topic_name: str):
         raise HTTPException(status_code=500, detail="Failed to fetch videos for topic")
 
 @app.put("/api/videos/{video_id}/topic")
-async def update_video_topic(video_id: str, topic_update: TopicUpdate):
+async def update_video_topic(
+    video_id: str,
+    topic_update: TopicUpdate,
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
     """Update the topic for a video"""
     try:
         with get_db_connection() as conn:
@@ -328,7 +408,10 @@ async def update_video_topic(video_id: str, topic_update: TopicUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/topics/rename")
-async def rename_topic(topic_rename: TopicRename):
+async def rename_topic(
+    topic_rename: TopicRename,
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
     """Rename a topic"""
     try:
         with get_db_connection() as conn:
@@ -348,7 +431,10 @@ async def rename_topic(topic_rename: TopicRename):
 
 # Chat endpoints
 @app.post("/api/chat/message")
-async def send_chat_message(message: ChatMessage):
+async def send_chat_message(
+    message: ChatMessage,
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
     """Process a chat message and return AI response"""
     if not chat_handler:
         raise HTTPException(status_code=400, detail="Chat service not configured")
@@ -366,7 +452,10 @@ async def send_chat_message(message: ChatMessage):
         raise HTTPException(status_code=500, detail=f"Failed to process message: {str(e)}")
 
 @app.post("/api/chat/export")
-async def export_conversation(export_request: ExportRequest):
+async def export_conversation(
+    export_request: ExportRequest,
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
     """Export conversation history in the specified format"""
     try:
         logger.info(f"Exporting conversation in {export_request.format} format")
