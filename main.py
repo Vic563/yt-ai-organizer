@@ -12,7 +12,7 @@ from database import init_database, get_db_connection
 from youtube_service import YouTubeService
 from gemini_service import GeminiService
 from chat_handler import ChatHandler
-from models import ChatMessage, ChatResponse, ConfigUpdate, LibraryStats, TopicUpdate, TopicRename
+from models import ChatMessage, ChatResponse, ConfigUpdate, LibraryStats, TopicUpdate, TopicRename, ExportRequest
 from topic_service import TopicManager
 from cost_api import router as cost_router
 from performance_middleware import performance_middleware
@@ -365,6 +365,44 @@ async def send_chat_message(message: ChatMessage):
         logger.error(f"Error processing chat message: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to process message: {str(e)}")
 
+@app.post("/api/chat/export")
+async def export_conversation(export_request: ExportRequest):
+    """Export conversation history in the specified format"""
+    try:
+        logger.info(f"Exporting conversation in {export_request.format} format")
+        
+        if export_request.format not in ['markdown', 'text', 'pdf']:
+            raise HTTPException(status_code=400, detail="Invalid format. Must be 'markdown', 'text', or 'pdf'")
+        
+        if not export_request.messages:
+            raise HTTPException(status_code=400, detail="No messages to export")
+        
+        # Generate export content based on format
+        if export_request.format == 'markdown':
+            content = _generate_markdown_export(export_request.messages, export_request.title)
+            content_type = "text/markdown"
+            filename = f"{export_request.title.replace(' ', '_')}.md"
+        elif export_request.format == 'text':
+            content = _generate_text_export(export_request.messages, export_request.title)
+            content_type = "text/plain"
+            filename = f"{export_request.title.replace(' ', '_')}.txt"
+        else:  # pdf
+            content = _generate_pdf_export(export_request.messages, export_request.title)
+            content_type = "application/pdf"
+            filename = f"{export_request.title.replace(' ', '_')}.pdf"
+        
+        return {
+            "content": content,
+            "content_type": content_type,
+            "filename": filename
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error exporting conversation: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to export conversation: {str(e)}")
+
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint"""
@@ -390,6 +428,186 @@ async def health_check():
 # Include API routes
 app.include_router(cost_router)
 app.include_router(performance_router)
+
+def _generate_markdown_export(messages: List[dict], title: str) -> str:
+    """Generate markdown export of conversation"""
+    from datetime import datetime
+    
+    lines = [
+        f"# {title}",
+        f"",
+        f"*Exported on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*",
+        f"",
+        "---",
+        ""
+    ]
+    
+    for msg in messages:
+        timestamp = msg.get('timestamp', '')
+        if timestamp:
+            try:
+                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                time_str = dt.strftime('%H:%M:%S')
+            except:
+                time_str = timestamp
+        else:
+            time_str = ''
+        
+        if msg.get('type') == 'user':
+            lines.append(f"## 👤 User {f'({time_str})' if time_str else ''}")
+            lines.append("")
+            lines.append(msg.get('content', ''))
+        else:
+            lines.append(f"## 🤖 Assistant {f'({time_str})' if time_str else ''}")
+            lines.append("")
+            lines.append(msg.get('content', ''))
+            
+            # Add video recommendations if present
+            videos = msg.get('videos', [])
+            if videos:
+                lines.append("")
+                lines.append("### 📹 Video Recommendations:")
+                for video in videos:
+                    lines.append(f"- [{video.get('title', 'Unknown')}]({video.get('url', '#')})")
+                    if video.get('relevance_reason'):
+                        lines.append(f"  - *{video.get('relevance_reason')}*")
+        
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+    
+    return "\n".join(lines)
+
+def _generate_text_export(messages: List[dict], title: str) -> str:
+    """Generate plain text export of conversation"""
+    from datetime import datetime
+    
+    lines = [
+        f"{title}",
+        f"{'=' * len(title)}",
+        f"",
+        f"Exported on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"",
+    ]
+    
+    for msg in messages:
+        timestamp = msg.get('timestamp', '')
+        if timestamp:
+            try:
+                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                time_str = dt.strftime('%H:%M:%S')
+            except:
+                time_str = timestamp
+        else:
+            time_str = ''
+        
+        if msg.get('type') == 'user':
+            lines.append(f"USER {f'({time_str})' if time_str else ''}:")
+            lines.append(msg.get('content', ''))
+        else:
+            lines.append(f"ASSISTANT {f'({time_str})' if time_str else ''}:")
+            lines.append(msg.get('content', ''))
+            
+            # Add video recommendations if present
+            videos = msg.get('videos', [])
+            if videos:
+                lines.append("")
+                lines.append("Video Recommendations:")
+                for video in videos:
+                    lines.append(f"- {video.get('title', 'Unknown')}: {video.get('url', '')}")
+                    if video.get('relevance_reason'):
+                        lines.append(f"  Relevance: {video.get('relevance_reason')}")
+        
+        lines.append("")
+        lines.append("-" * 50)
+        lines.append("")
+    
+    return "\n".join(lines)
+
+def _generate_pdf_export(messages: List[dict], title: str) -> str:
+    """Generate PDF export of conversation - returns base64 encoded PDF"""
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from io import BytesIO
+        import base64
+        from datetime import datetime
+        
+        # Create a BytesIO buffer
+        buffer = BytesIO()
+        
+        # Create the PDF document
+        doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=18)
+        
+        # Define styles
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=16, spaceAfter=30)
+        user_style = ParagraphStyle('UserStyle', parent=styles['Normal'], fontSize=12, spaceAfter=12, leftIndent=20)
+        assistant_style = ParagraphStyle('AssistantStyle', parent=styles['Normal'], fontSize=12, spaceAfter=12, leftIndent=20)
+        timestamp_style = ParagraphStyle('TimestampStyle', parent=styles['Normal'], fontSize=10, textColor='gray')
+        
+        # Build the story
+        story = []
+        
+        # Title
+        story.append(Paragraph(title, title_style))
+        story.append(Paragraph(f"Exported on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", timestamp_style))
+        story.append(Spacer(1, 20))
+        
+        for msg in messages:
+            timestamp = msg.get('timestamp', '')
+            if timestamp:
+                try:
+                    dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    time_str = dt.strftime('%H:%M:%S')
+                except:
+                    time_str = timestamp
+            else:
+                time_str = ''
+            
+            if msg.get('type') == 'user':
+                if time_str:
+                    story.append(Paragraph(f"<b>User ({time_str}):</b>", styles['Heading3']))
+                else:
+                    story.append(Paragraph("<b>User:</b>", styles['Heading3']))
+                story.append(Paragraph(msg.get('content', ''), user_style))
+            else:
+                if time_str:
+                    story.append(Paragraph(f"<b>Assistant ({time_str}):</b>", styles['Heading3']))
+                else:
+                    story.append(Paragraph("<b>Assistant:</b>", styles['Heading3']))
+                story.append(Paragraph(msg.get('content', ''), assistant_style))
+                
+                # Add video recommendations if present
+                videos = msg.get('videos', [])
+                if videos:
+                    story.append(Paragraph("<b>Video Recommendations:</b>", styles['Normal']))
+                    for video in videos:
+                        story.append(Paragraph(f"• {video.get('title', 'Unknown')}", styles['Normal']))
+                        if video.get('relevance_reason'):
+                            story.append(Paragraph(f"  <i>{video.get('relevance_reason')}</i>", styles['Normal']))
+            
+            story.append(Spacer(1, 20))
+        
+        # Build the PDF
+        doc.build(story)
+        
+        # Get the PDF data and encode as base64
+        pdf_data = buffer.getvalue()
+        buffer.close()
+        
+        return base64.b64encode(pdf_data).decode('utf-8')
+        
+    except ImportError:
+        # Fallback to HTML-to-PDF approach or simple text
+        logger.warning("reportlab not available, falling back to text format")
+        return _generate_text_export(messages, title)
+    except Exception as e:
+        logger.error(f"Error generating PDF: {e}")
+        # Fallback to text format
+        return _generate_text_export(messages, title)
 
 if __name__ == "__main__":
     import uvicorn

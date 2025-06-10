@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Send, Bot, User } from 'lucide-react'
+import { Send, Bot, User, Download, ChevronDown } from 'lucide-react'
 import { useChatStore } from '../hooks/useChat'
 import { sendChatMessage } from '../services/api'
 import VideoCard from './VideoCard'
@@ -7,15 +7,19 @@ import ReactMarkdown from 'react-markdown'
 
 const ChatInterface = () => {
   const [inputMessage, setInputMessage] = useState('')
+  const [showExportDropdown, setShowExportDropdown] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
+  const exportButtonRef = useRef(null)
   
   const { 
     messages, 
     isLoading, 
     addMessage, 
     setLoading, 
-    getConversationHistory 
+    getConversationHistory,
+    exportConversation 
   } = useChatStore()
 
   const scrollToBottom = () => {
@@ -39,6 +43,39 @@ const ChatInterface = () => {
       inputRef.current.focus()
     }
   }, [])
+
+  // Close export dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (exportButtonRef.current && !exportButtonRef.current.contains(event.target)) {
+        setShowExportDropdown(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [])
+
+  const handleExport = async (format) => {
+    if (messages.length === 0) {
+      alert('No conversation to export')
+      return
+    }
+
+    setIsExporting(true)
+    setShowExportDropdown(false)
+    
+    try {
+      await exportConversation(format)
+    } catch (error) {
+      console.error('Export error:', error)
+      alert(`Failed to export conversation: ${error.message}`)
+    } finally {
+      setIsExporting(false)
+    }
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -138,6 +175,50 @@ const ChatInterface = () => {
 
   return (
     <div className="chat-interface">
+      {/* Export Button - Show only when there are messages */}
+      {messages.length > 0 && (
+        <div className="chat-header">
+          <div className="export-container" ref={exportButtonRef}>
+            <button
+              className="export-button"
+              onClick={() => setShowExportDropdown(!showExportDropdown)}
+              disabled={isExporting}
+              title="Export conversation"
+            >
+              <Download size={16} />
+              {isExporting ? 'Exporting...' : 'Export'}
+              <ChevronDown size={14} />
+            </button>
+            
+            {showExportDropdown && (
+              <div className="export-dropdown">
+                <button
+                  className="export-option"
+                  onClick={() => handleExport('markdown')}
+                  disabled={isExporting}
+                >
+                  Markdown (.md)
+                </button>
+                <button
+                  className="export-option"
+                  onClick={() => handleExport('text')}
+                  disabled={isExporting}
+                >
+                  Text (.txt)
+                </button>
+                <button
+                  className="export-option"
+                  onClick={() => handleExport('pdf')}
+                  disabled={isExporting}
+                >
+                  PDF (.pdf)
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      
       <div className="chat-messages">
         {messages.length === 0 && (
           <div className="welcome-message">

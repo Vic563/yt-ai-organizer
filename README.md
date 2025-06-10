@@ -91,6 +91,14 @@ The AI maintains conversation context:
 - "What about the advanced techniques?"
 - "Can you find more videos on this topic?"
 
+### Export Conversations
+Save your chat history for later reference:
+- Click the "Export" button when you have an active conversation
+- Choose from three formats:
+  - **Markdown (.md)**: Formatted text with headers and links
+  - **Text (.txt)**: Plain text format for simple archiving
+  - **PDF (.pdf)**: Professional document format for sharing
+
 ## 🔧 Configuration
 
 ### Environment Variables
@@ -128,7 +136,9 @@ The AI maintains conversation context:
 - [ ] Cost tracking and optimization
 - [ ] Multi-language transcript support
 - [ ] Video content summarization
-- [ ] Export conversation history
+
+### ✅ Recently Added
+- [x] Export conversation history (Markdown, Text, PDF)
 
 ## 🔒 Privacy & Security
 

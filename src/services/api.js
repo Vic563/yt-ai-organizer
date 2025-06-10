@@ -55,6 +55,15 @@ export const getChatHistory = async (conversationId) => {
   return response.data
 }
 
+export const exportConversation = async (messages, format, title = 'Conversation History') => {
+  const response = await api.post('/chat/export', {
+    messages,
+    format,
+    title
+  })
+  return response.data
+}
+
 // Error handling
 api.interceptors.response.use(
   (response) => response,
