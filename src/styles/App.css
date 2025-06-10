@@ -89,10 +89,31 @@ body {
   gap: 0.75rem;
 }
 
+.header-left a {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+  color: var(--text-primary);
+  transition: all 0.2s ease;
+}
+
+.header-left a:hover {
+  color: var(--accent-color);
+  transform: translateY(-1px);
+}
+
 .header-left h1 {
   font-size: 1.5rem;
   font-weight: 600;
-  color: var(--text-primary);
+  color: inherit;
+}
+
+.header-left svg {
+  transition: all 0.2s ease;
+}
+
+.header-left a:hover svg {
+  transform: rotate(-5deg) scale(1.1);
 }
 
 .header-right {
@@ -195,6 +216,11 @@ body {
 .btn-icon:hover {
   background: var(--border-color);
   color: var(--text-primary);
+}
+
+.btn-icon.active {
+  color: var(--accent-color);
+  background: var(--border-color);
 }
 
 .spinning {

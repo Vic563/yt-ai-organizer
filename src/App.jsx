@@ -76,7 +76,8 @@ function App() {
     )
   }
 
-  if (!isConfigured && !showConfig && !isConfigPage) {
+  // Only show setup screen if not configured and not on any of the main pages
+  if (!isConfigured && location.pathname === '/setup') {
     return (
       <div className="app-setup">
         <div className="setup-container">
@@ -85,7 +86,7 @@ function App() {
           <p>Let's get you set up first.</p>
           <button 
             className="btn-primary"
-            onClick={() => setShowConfig(true)}
+            onClick={() => navigate('/config')}
           >
             Configure API Keys
           </button>
@@ -108,14 +109,14 @@ function App() {
           <div className="header-right">
             <Link 
               to="/" 
-              className={`btn-icon ${isChatPage ? 'text-blue-600' : 'text-gray-700'}`}
+              className={`btn-icon ${isChatPage ? 'active' : ''}`}
               title="Chat Interface"
             >
               <MessageCircle size={20} />
             </Link>
             <Link 
               to="/topics" 
-              className={`btn-icon ${isTopicsPage ? 'text-blue-600' : 'text-gray-700'}`}
+              className={`btn-icon ${isTopicsPage ? 'active' : ''}`}
               title="Browse by Topic"
             >
               <Folder size={20} />
@@ -129,7 +130,7 @@ function App() {
             </button>
             <Link 
               to="/library" 
-              className={`btn-icon ${isLibraryPage ? 'text-blue-600' : 'text-gray-700'}`}
+              className={`btn-icon ${isLibraryPage ? 'active' : ''}`}
               title="Video Library"
               onClick={handleShowLibrary}
             >
@@ -137,14 +138,14 @@ function App() {
             </Link>
             <Link 
               to="/config" 
-              className={`btn-icon ${isConfigPage ? 'text-blue-600' : 'text-gray-700'}`}
+              className={`btn-icon ${isConfigPage ? 'active' : ''}`}
               title="Settings"
             >
               <Settings size={20} />
             </Link>
             <Link 
               to="/performance" 
-              className={`btn-icon ${isPerformancePage ? 'text-blue-600' : 'text-gray-700'}`}
+              className={`btn-icon ${isPerformancePage ? 'active' : ''}`}
               title="Performance"
             >
               <BarChart2 size={20} />
@@ -173,15 +174,7 @@ function App() {
           <Route path="/library" element={
             <VideoLibrary onClose={() => setShowLibrary(false)} />
           } />
-          <Route path="/" element={
-            <>
-              {showLibrary ? (
-                <VideoLibrary onClose={() => setShowLibrary(false)} />
-              ) : (
-                <ChatInterface />
-              )}
-            </>
-          } />
+          <Route path="/" element={<ChatInterface />} />
         </Routes>
       </main>
       <footer style={{ textAlign: 'center', padding: '20px', fontSize: '0.9em', color: 'var(--text-color-secondary)' }}>Created by Victor Reyes</footer>
