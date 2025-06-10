@@ -90,3 +90,9 @@ class TopicRename(BaseModel):
     """Topic rename request"""
     old_name: str
     new_name: str
+
+class ExportRequest(BaseModel):
+    """Export conversation history request"""
+    messages: List[dict]  # Conversation messages to export
+    format: str  # 'markdown', 'text', or 'pdf'
+    title: Optional[str] = "Conversation History"
