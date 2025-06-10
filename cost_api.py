@@ -13,7 +13,15 @@ cost_tracker = CostTrackingService()
 
 @router.get("/usage/overall")
 async def get_overall_usage() -> Dict[str, Any]:
-    """Get overall API usage statistics"""
+    """
+    Retrieves overall API usage statistics.
+    
+    Returns:
+        A dictionary containing a success flag and the overall usage statistics data.
+        
+    Raises:
+        HTTPException: If retrieval of usage statistics fails.
+    """
     try:
         stats = cost_tracker.get_usage_stats()
         return {
@@ -26,7 +34,12 @@ async def get_overall_usage() -> Dict[str, Any]:
 
 @router.get("/usage/by-type")
 async def get_usage_by_type() -> Dict[str, Any]:
-    """Get API usage statistics grouped by query type"""
+    """
+    Retrieves API usage statistics grouped by query type.
+    
+    Returns:
+        A dictionary containing a success flag and usage statistics grouped by query type.
+    """
     try:
         stats = cost_tracker.get_usage_by_type()
         return {
@@ -39,7 +52,18 @@ async def get_usage_by_type() -> Dict[str, Any]:
 
 @router.get("/usage/daily")
 async def get_daily_usage(days: Optional[int] = 7) -> Dict[str, Any]:
-    """Get daily API usage statistics for the last N days"""
+    """
+    Retrieves daily API usage statistics for the specified number of days.
+    
+    Args:
+        days: The number of days to include in the statistics (between 1 and 365, default is 7).
+    
+    Returns:
+        A dictionary containing a success flag and the usage statistics data.
+    
+    Raises:
+        HTTPException: If the days parameter is out of range or if an unexpected error occurs.
+    """
     try:
         if days < 1 or days > 365:
             raise HTTPException(status_code=400, detail="Days must be between 1 and 365")
@@ -57,7 +81,12 @@ async def get_daily_usage(days: Optional[int] = 7) -> Dict[str, Any]:
 
 @router.get("/limits/check")
 async def check_usage_limits() -> Dict[str, Any]:
-    """Check if usage is approaching or exceeding limits"""
+    """
+    Checks if current API usage is approaching or exceeding predefined daily and monthly limits.
+    
+    Returns:
+        A dictionary containing whether usage is within limits, any warning messages, current usage values, and the configured limits.
+    """
     try:
         # Get current usage stats
         overall_stats = cost_tracker.get_usage_stats()
