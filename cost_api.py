@@ -1,6 +1,5 @@
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Any, Optional
-from datetime import datetime, timedelta
 import logging
 
 from cost_tracking_service import CostTrackingService
@@ -16,7 +15,7 @@ cost_tracker = CostTrackingService()
 async def get_overall_usage() -> Dict[str, Any]:
     """Get overall API usage statistics"""
     try:
-        stats = await cost_tracker.get_usage_stats()
+        stats = cost_tracker.get_usage_stats()
         return {
             "success": True,
             "data": stats
@@ -29,7 +28,7 @@ async def get_overall_usage() -> Dict[str, Any]:
 async def get_usage_by_type() -> Dict[str, Any]:
     """Get API usage statistics grouped by query type"""
     try:
-        stats = await cost_tracker.get_usage_by_type()
+        stats = cost_tracker.get_usage_by_type()
         return {
             "success": True,
             "data": stats
@@ -45,7 +44,7 @@ async def get_daily_usage(days: Optional[int] = 7) -> Dict[str, Any]:
         if days < 1 or days > 365:
             raise HTTPException(status_code=400, detail="Days must be between 1 and 365")
         
-        stats = await cost_tracker.get_daily_usage(days)
+        stats = cost_tracker.get_daily_usage(days)
         return {
             "success": True,
             "data": stats
@@ -61,8 +60,8 @@ async def check_usage_limits() -> Dict[str, Any]:
     """Check if usage is approaching or exceeding limits"""
     try:
         # Get current usage stats
-        overall_stats = await cost_tracker.get_usage_stats()
-        daily_stats = await cost_tracker.get_daily_usage(1)
+        overall_stats = cost_tracker.get_usage_stats()
+        daily_stats = cost_tracker.get_daily_usage(1)
         
         # Define some reasonable limits (these could be configurable)
         daily_cost_limit = 5.00  # $5 per day
