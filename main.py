@@ -7,7 +7,7 @@ import os
 import logging
 import time
 
-from config import get_settings
+from config import get_settings, clear_settings_cache
 from database import init_database, get_db_connection
 from youtube_service import YouTubeService
 from gemini_service import GeminiService
@@ -83,14 +83,20 @@ async def startup_event():
 async def check_configuration():
     """Check if the application is properly configured"""
     try:
-        configured = bool(settings.google_ai_api_key and settings.youtube_api_key and settings.google_cloud_project_id)
+        # Get fresh settings
+        current_settings = get_settings()
+        configured = bool(current_settings.google_ai_api_key and current_settings.youtube_api_key and current_settings.google_cloud_project_id)
+        
+        logger.info(f"Config check - Google AI API Key: {'Set' if current_settings.google_ai_api_key else 'Not set'}")
+        logger.info(f"Config check - YouTube API Key: {'Set' if current_settings.youtube_api_key else 'Not set'}")
+        logger.info(f"Config check - Google Cloud Project ID: {current_settings.google_cloud_project_id or 'Not set'}")
         
         return {
             "configured": configured,
             "keys": {
-                "googleAiApiKey": bool(settings.google_ai_api_key),
-                "youtubeApiKey": bool(settings.youtube_api_key),
-                "googleCloudProjectId": settings.google_cloud_project_id
+                "googleAiApiKey": bool(current_settings.google_ai_api_key),
+                "youtubeApiKey": bool(current_settings.youtube_api_key),
+                "googleCloudProjectId": current_settings.google_cloud_project_id
             }
         }
     except Exception as e:
@@ -101,17 +107,53 @@ async def check_configuration():
 async def update_configuration(config: ConfigUpdate):
     """Update API configuration"""
     try:
-        # Update environment variables
-        os.environ["GOOGLE_AI_API_KEY"] = config.google_ai_api_key
-        os.environ["YOUTUBE_API_KEY"] = config.youtube_api_key
-        os.environ["GOOGLE_CLOUD_PROJECT_ID"] = config.google_cloud_project_id
+        logger.info(f"Received /api/config/update request")
+        logger.info(f"googleAiApiKey: {config.googleAiApiKey}")
+        logger.info(f"youtubeApiKey: {config.youtubeApiKey}")
+        logger.info(f"googleCloudProjectId: {config.googleCloudProjectId}")
+        env_path = ".env"
+        env_vars = {}
+        if os.path.exists(env_path):
+            with open(env_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and "=" in line and not line.startswith("#"):
+                        key, value = line.split("=", 1)
+                        env_vars[key.strip()] = value.strip()
+        
+        # Update with new values if provided and valid
+        logger.info(f"Current env_vars before update: {env_vars}")
+        # Only update if a non-null, non-empty value is provided
+        if config.googleAiApiKey and config.googleAiApiKey.strip():
+            env_vars["GOOGLE_AI_API_KEY"] = config.googleAiApiKey
+            logger.info("Updating GOOGLE_AI_API_KEY")
+        if config.youtubeApiKey and config.youtubeApiKey.strip():
+            env_vars["YOUTUBE_API_KEY"] = config.youtubeApiKey
+            logger.info("Updating YOUTUBE_API_KEY")
+        if config.googleCloudProjectId and config.googleCloudProjectId.strip():
+            env_vars["GOOGLE_CLOUD_PROJECT_ID"] = config.googleCloudProjectId
+            logger.info("Updating GOOGLE_CLOUD_PROJECT_ID")
+
+        logger.info(f"Attempting to write to .env. env_vars to be written: {env_vars}")
+        with open(env_path, "w") as f:
+            for key, value in env_vars.items():
+                f.write(f"{key}={value}\n")
+        
+        # Clear the settings cache and reinitialize
+        clear_settings_cache()
         
         # Reinitialize settings
         global settings, youtube_service, gemini_service, chat_handler
         settings = get_settings()
         
+        # Log the new settings to verify they were loaded
+        logger.info(f"New settings loaded - Google AI API Key: {'Set' if settings.google_ai_api_key else 'Not set'}")
+        logger.info(f"New settings loaded - YouTube API Key: {'Set' if settings.youtube_api_key else 'Not set'}")
+        logger.info(f"New settings loaded - Google Cloud Project ID: {settings.google_cloud_project_id or 'Not set'}")
+        
         # Test the API keys by initializing services
         init_services()
+        logger.info(".env file updated and services re-initialized.")
         
         logger.info("Configuration updated and tested successfully")
         return {"success": True, "message": "Configuration updated and services reinitialized"}
@@ -165,6 +207,42 @@ async def get_all_videos():
     except Exception as e:
         logger.error(f"Error getting videos: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get videos: {str(e)}")
+
+@app.post("/api/videos/{video_id}/retry-transcript")
+async def retry_video_transcript(video_id: str):
+    """Retry fetching transcript for a specific video"""
+    if not youtube_service:
+        raise HTTPException(status_code=400, detail="YouTube service not configured")
+    
+    try:
+        logger.info(f"Retrying transcript fetch for video: {video_id}")
+        success = await youtube_service.retry_transcript_fetch(video_id)
+        
+        if success:
+            return {"success": True, "message": "Transcript fetched successfully"}
+        else:
+            return {"success": False, "message": "Transcript still unavailable. This could be due to rate limiting, restricted access, or the video not having captions."}
+    except Exception as e:
+        logger.error(f"Error retrying transcript fetch: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retry transcript fetch: {str(e)}")
+
+@app.post("/api/videos/retry-all-transcripts")
+async def retry_all_missing_transcripts():
+    """Retry fetching transcripts for all videos without transcripts"""
+    if not youtube_service:
+        raise HTTPException(status_code=400, detail="YouTube service not configured")
+    
+    try:
+        logger.info("Retrying transcript fetch for all videos without transcripts")
+        count = await youtube_service._fetch_missing_transcripts()
+        return {
+            "success": True, 
+            "message": f"Fetched {count} new transcripts",
+            "transcripts_fetched": count
+        }
+    except Exception as e:
+        logger.error(f"Error retrying all transcript fetches: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retry transcript fetches: {str(e)}")
 
 @app.get("/api/library/stats")
 async def get_library_stats():

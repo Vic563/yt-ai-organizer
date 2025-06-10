@@ -24,7 +24,7 @@ const ConfigPanel = ({ onClose, onConfigured }) => {
   const loadCurrentConfig = async () => {
     try {
       const response = await checkConfiguration()
-      if (response.configured) {
+      if (response.configured || response.keys) {
         setConfig({
           googleAiApiKey: response.keys?.googleAiApiKey ? '••••••••••••••••' : '',
           youtubeApiKey: response.keys?.youtubeApiKey ? '••••••••••••••••' : '',
@@ -57,25 +57,53 @@ const ConfigPanel = ({ onClose, onConfigured }) => {
     setStatus({ type: '', message: '' })
   }
 
+  const handleKeyPress = (e) => {
+    // Prevent form submission on Enter key
+    if (e.key === 'Enter') {
+      e.preventDefault()
+    }
+  }
+
   const toggleShowKey = (field) => {
     setShowKeys(prev => ({ ...prev, [field]: !prev[field] }))
   }
 
-  const handleSave = async () => {
+  const handleSave = async (e) => {
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
     setIsLoading(true)
     setStatus({ type: '', message: '' })
 
     try {
-      const response = await updateConfiguration(config)
+      const MASKED_VALUE = '••••••••••••••••';
+      // Only send non-masked values and non-empty values
+      const configData = {
+        googleAiApiKey: (config.googleAiApiKey && config.googleAiApiKey !== MASKED_VALUE) ? config.googleAiApiKey : null,
+        youtubeApiKey: (config.youtubeApiKey && config.youtubeApiKey !== MASKED_VALUE) ? config.youtubeApiKey : null,
+        googleCloudProjectId: config.googleCloudProjectId || null
+      };
+      console.log('Sending to backend /api/config/update:', configData);
+      const response = await updateConfiguration(configData)
+      console.log('Update configuration response:', response);
       
       if (response.success) {
         setStatus({ 
           type: 'success', 
           message: 'Configuration saved successfully!' 
         })
-        setTimeout(() => {
+        // Wait a bit for backend to fully process the save
+        setTimeout(async () => {
+          // Reload the configuration to show saved values
+          try {
+            await loadCurrentConfig()
+          } catch (err) {
+            console.error('Error loading config after save:', err)
+          }
+          // Navigate after configuration is confirmed saved
           onConfigured()
-        }, 1500)
+        }, 500)
       } else {
         setStatus({ 
           type: 'error', 
@@ -95,21 +123,20 @@ const ConfigPanel = ({ onClose, onConfigured }) => {
   const isFormValid = () => {
     return config.googleAiApiKey && 
            config.youtubeApiKey && 
-           config.googleCloudProjectId &&
-           !config.googleAiApiKey.includes('••••') &&
-           !config.youtubeApiKey.includes('••••')
+           config.googleCloudProjectId
   }
 
   return (
     <div className="config-panel">
-      <div className="config-header">
-        <h2>Configuration</h2>
-        <button className="btn-icon" onClick={onClose}>
-          <X size={20} />
-        </button>
-      </div>
+      <form onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+        <div className="config-header">
+          <h2>Configuration</h2>
+          <button type="button" className="btn-icon" onClick={onClose}>
+            <X size={20} />
+          </button>
+        </div>
 
-      <div className="config-content">
+        <div className="config-content">
         <div className="config-section">
           <h3>API Keys Setup</h3>
           <p>You'll need to obtain these API keys to use Project Insight:</p>
@@ -117,6 +144,9 @@ const ConfigPanel = ({ onClose, onConfigured }) => {
           <div className="form-group">
             <label htmlFor="googleAiApiKey">
               Google AI Studio API Key
+              {config.googleAiApiKey && config.googleAiApiKey.includes('••••') && (
+                <span style={{ color: '#10b981', marginLeft: '8px', fontSize: '14px' }}>✓ Configured</span>
+              )}
               <a 
                 href="https://aistudio.google.com/app/apikey" 
                 target="_blank" 
@@ -133,6 +163,7 @@ const ConfigPanel = ({ onClose, onConfigured }) => {
                 type={showKeys.googleAiApiKey ? 'text' : 'password'}
                 value={config.googleAiApiKey}
                 onChange={(e) => handleInputChange('googleAiApiKey', e.target.value)}
+                onKeyPress={handleKeyPress}
                 placeholder="Enter your Google AI Studio API key"
                 className="config-input"
               />
@@ -149,6 +180,9 @@ const ConfigPanel = ({ onClose, onConfigured }) => {
           <div className="form-group">
             <label htmlFor="youtubeApiKey">
               YouTube Data API Key
+              {config.youtubeApiKey && config.youtubeApiKey.includes('••••') && (
+                <span style={{ color: '#10b981', marginLeft: '8px', fontSize: '14px' }}>✓ Configured</span>
+              )}
               <a 
                 href="https://console.cloud.google.com/apis/credentials" 
                 target="_blank" 
@@ -165,6 +199,7 @@ const ConfigPanel = ({ onClose, onConfigured }) => {
                 type={showKeys.youtubeApiKey ? 'text' : 'password'}
                 value={config.youtubeApiKey}
                 onChange={(e) => handleInputChange('youtubeApiKey', e.target.value)}
+                onKeyPress={handleKeyPress}
                 placeholder="Enter your YouTube Data API key"
                 className="config-input"
               />
@@ -181,12 +216,16 @@ const ConfigPanel = ({ onClose, onConfigured }) => {
           <div className="form-group">
             <label htmlFor="googleCloudProjectId">
               Google Cloud Project ID
+              {config.googleCloudProjectId && (
+                <span style={{ color: '#10b981', marginLeft: '8px', fontSize: '14px' }}>✓ Configured</span>
+              )}
             </label>
             <input
               id="googleCloudProjectId"
               type="text"
               value={config.googleCloudProjectId}
               onChange={(e) => handleInputChange('googleCloudProjectId', e.target.value)}
+              onKeyPress={handleKeyPress}
               placeholder="Enter your Google Cloud Project ID"
               className="config-input"
             />
@@ -227,6 +266,7 @@ const ConfigPanel = ({ onClose, onConfigured }) => {
 
         <div className="config-actions">
           <button
+            type="button"
             className="btn-secondary"
             onClick={onClose}
             disabled={isLoading}
@@ -234,6 +274,7 @@ const ConfigPanel = ({ onClose, onConfigured }) => {
             Cancel
           </button>
           <button
+            type="button"
             className="btn-primary"
             onClick={handleSave}
             disabled={!isFormValid() || isLoading}
@@ -243,6 +284,7 @@ const ConfigPanel = ({ onClose, onConfigured }) => {
           </button>
         </div>
       </div>
+      </form>
     </div>
   )
 }

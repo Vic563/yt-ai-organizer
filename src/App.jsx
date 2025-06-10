@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Routes, Route, Link, useLocation } from 'react-router-dom';
+import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import ChatInterface from './components/ChatInterface';
 import ConfigPanel from './components/ConfigPanel';
 import VideoLibrary from './components/VideoLibrary';
@@ -11,6 +11,7 @@ import { checkConfiguration } from './services/api';
 
 function App() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [showConfig, setShowConfig] = useState(false)
   const [showLibrary, setShowLibrary] = useState(false)
   const [isConfigured, setIsConfigured] = useState(false)
@@ -75,7 +76,7 @@ function App() {
     )
   }
 
-  if (!isConfigured && !showConfig) {
+  if (!isConfigured && !showConfig && !isConfigPage) {
     return (
       <div className="app-setup">
         <div className="setup-container">
@@ -156,10 +157,14 @@ function App() {
         <Routes>
           <Route path="/config" element={
             <ConfigPanel 
-              onClose={() => setShowConfig(false)} 
-              onConfigured={() => {
+              onClose={() => navigate('/')} 
+              onConfigured={async () => {
                 setIsConfigured(true);
                 setShowConfig(false);
+                // Reload configuration status
+                await checkConfig();
+                // Navigate to home page
+                navigate('/');
               }} 
             />
           } />

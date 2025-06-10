@@ -33,6 +33,13 @@ def get_settings() -> Settings:
     """Get cached settings instance"""
     return Settings()
 
+def clear_settings_cache():
+    """Clear the settings cache to reload configuration"""
+    get_settings.cache_clear()
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("Settings cache cleared - configuration will be reloaded on next access")
+
 def ensure_data_directories():
     """Ensure required data directories exist"""
     settings = get_settings()
@@ -43,3 +50,6 @@ def ensure_data_directories():
     
     # Create transcripts directory
     os.makedirs(settings.transcripts_dir, exist_ok=True)
+
+# Ensure data directories are created when this module is imported
+ensure_data_directories()

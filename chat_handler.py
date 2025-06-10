@@ -406,16 +406,25 @@ Please provide a detailed answer using the information from these videos. If you
                 prompt_parts.append(f"{role}: {msg.content}")
             prompt_parts.append("")
         
-        # Add instructions
+        # Add instructions with strict constraints
         prompt_parts.extend([
+            "IMPORTANT: You are an AI assistant that helps users explore their PERSONAL YouTube video library.",
+            "You must ONLY reference videos that exist in the user's personal collection.",
+            "NEVER suggest, recommend, or mention videos that are not in their library.",
+            "NEVER hallucinate or make up video titles, content, or recommendations.",
+            "",
             "Please respond in a friendly, helpful manner. Here's what you can help with:",
             "- Answering general questions about the user's video library",
-            "- Helping find specific videos or topics",
+            "- Helping find specific videos or topics IN THEIR LIBRARY",
             "- Explaining concepts from the user's videos",
             "- Suggesting ways to organize or explore their library",
             "",
-            "Keep your response concise and focused. If the user asks about something that requires "
-            "searching their library, you can ask if they'd like you to search for relevant videos.",
+            "If the user asks about videos on a topic, you should:",
+            "1. Acknowledge their question",
+            "2. Offer to search their personal library for relevant videos",
+            "3. NEVER suggest external videos or content not in their library",
+            "",
+            "Keep your response concise and focused.",
             "",
             "Your response:"
         ])

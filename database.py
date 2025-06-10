@@ -138,7 +138,18 @@ def get_videos_by_query(query: str, limit: int = 10) -> List[Dict[str, Any]]:
 
             # Split query into individual words for better matching
             # Filter out very short words and common stop words that cause false matches
-            stop_words = {'i', 'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'to', 'of', 'in', 'on', 'at', 'by', 'for', 'with', 'as', 'and', 'or', 'but', 'if', 'any', 'some', 'all', 'no', 'not', 'my', 'your', 'his', 'her', 'its', 'our', 'their'}
+            stop_words = {
+                'i', 'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had',
+                'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'to',
+                'of', 'in', 'on', 'at', 'by', 'for', 'with', 'as', 'and', 'or', 'but', 'if', 'any',
+                'some', 'all', 'no', 'not', 'my', 'your', 'his', 'her', 'its', 'our', 'their', 'this',
+                'that', 'these', 'those', 'me', 'you', 'he', 'she', 'it', 'we', 'they', 'them', 'us',
+                'about', 'videos', 'video', 'watch', 'see', 'get', 'go', 'come', 'take', 'make', 'know',
+                'think', 'say', 'tell', 'ask', 'give', 'find', 'look', 'want', 'need', 'try', 'use',
+                'work', 'call', 'first', 'last', 'long', 'great', 'little', 'own', 'other', 'old', 'right',
+                'big', 'high', 'different', 'small', 'large', 'next', 'early', 'young', 'important', 'few',
+                'public', 'bad', 'same', 'able'
+            }
             query_words = [
                 word.strip().lower().rstrip('?.,!;:')
                 for word in query.split()
@@ -201,8 +212,27 @@ def get_videos_by_query(query: str, limit: int = 10) -> List[Dict[str, Any]]:
                 cursor.execute(word_query, all_params)
                 word_results = [dict(row) for row in cursor.fetchall()]
 
-                # Filter out results with very low relevance (less than 1 word match)
-                filtered_results = [video for video in word_results if video.get('word_matches', 0) > 0]
+                # Filter out results with very low relevance
+                # Require at least 1 meaningful word match, and if there are multiple query words,
+                # require a higher threshold to avoid weak matches
+                min_matches = 1 if len(query_words) <= 2 else max(1, len(query_words) // 2)
+                filtered_results = [video for video in word_results if video.get('word_matches', 0) >= min_matches]
+
+                # Additional filter: if the query has specific meaningful terms (not just stop words),
+                # ensure we have some actual content relevance
+                if filtered_results and len(query_words) > 0:
+                    # Check if any of the query words appear in title (higher relevance)
+                    title_matches = []
+                    for video in filtered_results:
+                        title_lower = video['title'].lower()
+                        has_title_match = any(word in title_lower for word in query_words)
+                        if has_title_match:
+                            title_matches.append(video)
+
+                    # If we have title matches, prefer those; otherwise use all filtered results
+                    if title_matches:
+                        return title_matches
+
                 return filtered_results
 
             return []

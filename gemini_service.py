@@ -187,9 +187,9 @@ Remember: You are working with the user's personal, curated video library. This 
             - query_rewrite: A clearer, more specific version of the query if needed, otherwise empty string
             
             Intent definitions:
-            - 'discovery': User is looking for specific information or videos
-            - 'synthesis': User wants analysis or synthesis of information across videos
-            - 'conversational': General conversation or follow-up question
+            - 'discovery': User is looking for specific videos in their library (e.g., "Do I have videos about X?", "What videos do I have on Y?", "Are there any videos about Z?")
+            - 'synthesis': User wants analysis or synthesis of information from their video transcripts (e.g., "How do I do X?", "What is Y?", "Explain Z")
+            - 'conversational': General conversation, greetings, or questions about capabilities (e.g., "Hello", "What can you do?", "How are you?")
             
             Conversation context (most recent first):
             {context}
@@ -199,25 +199,40 @@ Remember: You are working with the user's personal, curated video library. This 
             Respond with valid JSON only, no other text:"""
             
             # Get response from Gemini
-            response = await self.generate_response(
-                prompt,
-                temperature=0.1,  # Lower temperature for more consistent results
-                max_output_tokens=500
-            )
+            response = self.model.generate_content(prompt)
             
-            # Track usage
-            await self.cost_tracker.track_usage(
+            # Track usage with cost tracking service
+            prompt_tokens = len(prompt.split())
+            completion_tokens = len(response.text.split()) if response.text else 0
+            total_tokens = prompt_tokens + completion_tokens
+
+            usage_record = self.cost_tracker.track_usage(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                model=self.settings.gemini_model,
                 conversation_id="intent_analysis",
-                query_type="intent_analysis",
-                input_tokens=len(prompt.split()),
-                output_tokens=len(response.text.split()) if response.text else 0,
-                total_tokens=len(prompt.split()) + (len(response.text.split()) if response.text else 0)
+                query_type="intent_analysis"
             )
             
             # Parse the JSON response
             try:
                 import json
-                result = json.loads(response.text.strip())
+                import re
+
+                # Clean the response text - remove markdown code blocks if present
+                response_text = response.text.strip()
+
+                # Remove markdown code blocks
+                if response_text.startswith('```json'):
+                    response_text = response_text[7:]  # Remove ```json
+                if response_text.startswith('```'):
+                    response_text = response_text[3:]   # Remove ```
+                if response_text.endswith('```'):
+                    response_text = response_text[:-3]  # Remove trailing ```
+
+                response_text = response_text.strip()
+
+                result = json.loads(response_text)
                 
                 # Validate required fields
                 if not all(key in result for key in ['intent', 'entities', 'requires_context', 'follow_up', 'query_rewrite']):

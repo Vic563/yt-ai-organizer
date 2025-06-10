@@ -11,3 +11,4 @@ httpx==0.25.2
 python-multipart==0.0.6
 youtube-transcript-api==0.6.1
 requests==2.31.0
+yt-dlp==2024.5.27

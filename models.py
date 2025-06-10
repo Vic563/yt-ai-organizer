@@ -42,9 +42,9 @@ class ChatResponse(BaseModel):
 
 class ConfigUpdate(BaseModel):
     """Configuration update request"""
-    google_ai_api_key: str
-    youtube_api_key: str
-    google_cloud_project_id: str
+    googleAiApiKey: Optional[str] = None
+    youtubeApiKey: Optional[str] = None
+    googleCloudProjectId: Optional[str] = None
 
 class LibraryStats(BaseModel):
     """Library statistics"""

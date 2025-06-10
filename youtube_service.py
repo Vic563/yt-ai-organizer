@@ -3,13 +3,15 @@ import logging
 from typing import List, Dict, Any, Optional, Tuple
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptList
 from youtube_transcript_api.formatters import TextFormatter
+from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound, VideoUnavailable, CouldNotRetrieveTranscript
 
 from config import get_settings
 from database import get_db_connection, insert_video, update_video_transcript_status
 from models import VideoMetadata, VideoTranscript, TranscriptSegment
 from topic_service import TopicExtractor, TopicManager
+from simple_transcript_fetcher import SimpleTranscriptFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,7 @@ class YouTubeService:
         self.api_key = api_key
         self.youtube = build('youtube', 'v3', developerKey=api_key)
         self.settings = get_settings()
+        self.transcript_fetcher = SimpleTranscriptFetcher()
         
         # Initialize topic extractor if Gemini API key is provided
         self.topic_extractor = None
@@ -88,11 +91,17 @@ class YouTubeService:
                     self._save_transcript_to_file(video_id, transcript.full_text)
                     update_video_transcript_status(video_id, True, transcript.language)
                     result["transcript_fetched"] = True
-                    result["message"] += " with transcript"
+                    result["message"] += f" with transcript ({len(transcript.full_text)} characters)"
                     transcript_text = transcript.full_text
                 else:
+                    # Log more details about the failure
+                    logger.warning(f"Could not fetch transcript for {video_id}. This may be due to:")
+                    logger.warning("- YouTube rate limiting or blocking requests")
+                    logger.warning("- Video has restricted access or is private")
+                    logger.warning("- Transcripts are disabled for this video")
+                    logger.warning("- Temporary network issues")
                     update_video_transcript_status(video_id, False)
-                    result["message"] += " (no transcript available)"
+                    result["message"] += " (transcript temporarily unavailable - try refreshing later)"
                 
                 # Extract and assign topic if extractor is available (works with or without transcript)
                 if self.topic_extractor:
@@ -353,42 +362,193 @@ class YouTubeService:
                         transcript.language
                     )
                     count += 1
+                    logger.info(f"Successfully fetched transcript for {video['video_id']}: {video.get('title', 'Unknown')}")
+                else:
+                    logger.info(f"No transcript available for {video['video_id']}: {video.get('title', 'Unknown')}")
                     
             except Exception as e:
                 logger.warning(f"Failed to fetch transcript for {video['video_id']}: {e}")
-                # Mark as no transcript available
-                update_video_transcript_status(video['video_id'], False)
+                # Don't mark as permanently unavailable - might be temporary issue
         
-        logger.info(f"Fetched {count} transcripts")
+        logger.info(f"Fetched {count} new transcripts out of {len(videos_without_transcripts)} videos without transcripts")
         return count
     
+    async def retry_transcript_fetch(self, video_id: str) -> bool:
+        """Retry fetching transcript for a specific video"""
+        logger.info(f"Retrying transcript fetch for video {video_id}")
+        
+        try:
+            transcript = await self.get_video_transcript(video_id)
+            if transcript:
+                # Save transcript to file
+                self._save_transcript_to_file(video_id, transcript.full_text)
+                
+                # Update database
+                update_video_transcript_status(
+                    video_id, 
+                    True, 
+                    transcript.language
+                )
+                logger.info(f"Successfully fetched transcript on retry for {video_id}")
+                return True
+            else:
+                logger.info(f"Still no transcript available for {video_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to retry transcript fetch for {video_id}: {e}")
+            return False
+    
     async def get_video_transcript(self, video_id: str) -> Optional[VideoTranscript]:
-        """Get transcript for a specific video with robust error handling and multiple fallback strategies"""
+        """Get transcript for a specific video using multiple fallback strategies"""
         logger.info(f"Attempting to fetch transcript for video: {video_id}")
-        
-        # Try different approaches in order of preference
-        strategies = [
-            self._fetch_transcript_with_retries,
-            self._fetch_transcript_with_proxy_headers,
-            self._fetch_transcript_basic,
-            self._fetch_transcript_timedtext
-        ]
-        
-        for i, strategy in enumerate(strategies, 1):
-            try:
-                logger.info(f"Trying transcript fetch strategy {i}/{len(strategies)} for {video_id}")
-                result = await strategy(video_id)
-                if result:
-                    logger.info(f"Successfully fetched transcript for {video_id} using strategy {i}")
-                    return result
-                else:
-                    logger.debug(f"Strategy {i} returned no transcript for {video_id}")
-            except Exception as e:
-                logger.warning(f"Strategy {i} failed for {video_id}: {type(e).__name__}: {e}")
-                continue
-        
-        logger.error(f"All transcript fetch strategies failed for {video_id}")
+
+        # Strategy 1: Use SimpleTranscriptFetcher (browser-like approach)
+        try:
+            logger.debug("Strategy 1: Using SimpleTranscriptFetcher")
+            transcript = await self.transcript_fetcher.fetch_transcript(video_id)
+            if transcript:
+                logger.info(f"Strategy 1 SUCCESS: Fetched transcript using SimpleTranscriptFetcher - {len(transcript.segments)} segments, {len(transcript.full_text)} characters")
+                return transcript
+        except Exception as e:
+            logger.debug(f"Strategy 1 FAILED: SimpleTranscriptFetcher error: {type(e).__name__}: {e}")
+
+        # Strategy 2: Use yt-dlp based fetcher
+        try:
+            logger.debug("Strategy 2: Using yt-dlp based fetcher")
+            from ytdlp_transcript_fetcher import YtDlpTranscriptFetcher
+            ytdlp_fetcher = YtDlpTranscriptFetcher()
+            transcript = await ytdlp_fetcher.fetch_transcript(video_id)
+            if transcript:
+                logger.info(f"Strategy 2 SUCCESS: Fetched transcript using yt-dlp - {len(transcript.segments)} segments, {len(transcript.full_text)} characters")
+                return transcript
+        except Exception as e:
+            logger.debug(f"Strategy 2 FAILED: yt-dlp error: {type(e).__name__}: {e}")
+
+        # Strategy 3: Use YouTube Transcript API with focus on auto-generated captions
+        try:
+            logger.debug("Strategy 3: Using YouTube Transcript API focusing on auto-generated captions")
+            transcript = await self._fetch_transcript_auto_generated_only(video_id)
+            if transcript:
+                logger.info(f"Strategy 3 SUCCESS: Fetched auto-generated transcript - {len(transcript.segments)} segments, {len(transcript.full_text)} characters")
+                return transcript
+        except Exception as e:
+            logger.debug(f"Strategy 3 FAILED: Auto-generated captions error: {type(e).__name__}: {e}")
+
+        # Strategy 4: Direct timedtext endpoint access
+        try:
+            logger.debug("Strategy 4: Using direct timedtext endpoint")
+            transcript = await self._fetch_transcript_timedtext(video_id)
+            if transcript:
+                logger.info(f"Strategy 4 SUCCESS: Fetched transcript using timedtext endpoint - {len(transcript.segments)} segments, {len(transcript.full_text)} characters")
+                return transcript
+        except Exception as e:
+            logger.debug(f"Strategy 4 FAILED: Timedtext endpoint error: {type(e).__name__}: {e}")
+
+        # Strategy 5: Innertube API approach
+        try:
+            logger.debug("Strategy 5: Using innertube API approach")
+            transcript = await self._fetch_transcript_innertube(video_id)
+            if transcript:
+                logger.info(f"Strategy 5 SUCCESS: Fetched transcript using innertube API - {len(transcript.segments)} segments, {len(transcript.full_text)} characters")
+                return transcript
+        except Exception as e:
+            logger.debug(f"Strategy 5 FAILED: Innertube API error: {type(e).__name__}: {e}")
+
+        # All strategies failed
+        logger.warning(f"All transcript fetching strategies failed for video {video_id}")
+        logger.warning("TRANSCRIPT FETCHING ISSUE ANALYSIS:")
+        logger.warning("YouTube has implemented sophisticated anti-bot protection that blocks automated transcript requests.")
+        logger.warning("Even though we can successfully:")
+        logger.warning("- Load video pages")
+        logger.warning("- Extract caption track information")
+        logger.warning("- Get transcript URLs")
+        logger.warning("YouTube returns empty responses (HTTP 200 but no content) for all transcript downloads.")
+        logger.warning("")
+        logger.warning("POSSIBLE SOLUTIONS:")
+        logger.warning("1. Use a different video that may have less protection")
+        logger.warning("2. Try again later (YouTube's blocking may be temporary)")
+        logger.warning("3. Use manual transcript extraction (copy/paste from YouTube)")
+        logger.warning("4. Consider using a proxy service or different IP address")
+        logger.warning("5. For development, use pre-downloaded transcript files")
+
         return None
+
+    async def _fetch_transcript_auto_generated_only(self, video_id: str) -> Optional[VideoTranscript]:
+        """Fetch only auto-generated transcripts using youtube-transcript-api"""
+        try:
+            logger.debug(f"Attempting to fetch auto-generated transcript for {video_id}")
+
+            # Try to list all transcript languages
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+
+            # Look specifically for auto-generated English transcripts
+            transcript = None
+            language_used = None
+
+            # Try to find auto-generated English transcript
+            try:
+                transcript = transcript_list.find_generated_transcript(['en'])
+                language_used = transcript.language_code
+                logger.debug(f"Found auto-generated English transcript for {video_id} ({language_used})")
+            except Exception as e:
+                logger.debug(f"No auto-generated English transcript: {e}")
+
+                # Try any auto-generated transcript
+                available_transcripts = []
+                for t in transcript_list:
+                    if t.is_generated:
+                        available_transcripts.append({
+                            'language': t.language,
+                            'language_code': t.language_code,
+                            'is_generated': t.is_generated
+                        })
+
+                if available_transcripts:
+                    # Use the first auto-generated transcript
+                    first_auto = available_transcripts[0]
+                    transcript = transcript_list.find_transcript([first_auto['language_code']])
+                    language_used = transcript.language_code
+                    logger.debug(f"Using auto-generated transcript in {language_used}")
+
+            if transcript:
+                logger.debug(f"Fetching auto-generated transcript data for {video_id} in language: {language_used}")
+                transcript_list_data = transcript.fetch()
+
+                if not transcript_list_data:
+                    logger.debug(f"Auto-generated transcript fetch returned empty list for {video_id}")
+                    return None
+
+                segments = []
+                full_text_parts = []
+                for entry in transcript_list_data:
+                    segment = TranscriptSegment(
+                        start_time=entry.get('start', 0),
+                        duration=entry.get('duration', 0),
+                        text=entry.get('text', '')
+                    )
+                    segments.append(segment)
+                    full_text_parts.append(entry.get('text', ''))
+
+                full_text = ' '.join(full_text_parts).strip()
+                if not full_text:
+                    logger.debug(f"Auto-generated transcript for {video_id} is empty after processing")
+                    return None
+
+                logger.debug(f"Successfully fetched auto-generated transcript for {video_id}: {len(segments)} segments, {len(full_text)} characters")
+                return VideoTranscript(
+                    video_id=video_id,
+                    language=language_used,
+                    segments=segments,
+                    full_text=full_text
+                )
+            else:
+                logger.debug(f"No auto-generated transcript available for {video_id}")
+                return None
+
+        except Exception as e:
+            logger.debug(f"Error fetching auto-generated transcript for {video_id}: {type(e).__name__}: {e}")
+            return None
 
     async def _fetch_transcript_timedtext(self, video_id: str) -> Optional[VideoTranscript]:
         """Fetch transcript using the public timedtext endpoint as a last resort"""
@@ -396,12 +556,57 @@ class YouTubeService:
         import xml.etree.ElementTree as ET
         import html
 
-        languages = ['en', 'en-US', 'en-GB']
+        # Try different URL patterns and headers
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+        }
+        
+        languages = ['en', 'en-US', 'en-GB', 'a.en']  # 'a.en' is sometimes used for auto-generated
         for lang in languages:
             try:
+                # Try the standard timedtext URL
+                url = f"https://www.youtube.com/api/timedtext?v={video_id}&lang={lang}&fmt=srv3"
+                logger.debug(f"Attempting timedtext fetch for {video_id} using {lang} with srv3 format")
+                resp = requests.get(url, headers=headers, timeout=10)
+                
+                if resp.status_code == 200 and resp.text.strip():
+                    # Try to parse as srv3 format (JSON)
+                    try:
+                        import json
+                        data = json.loads(resp.text)
+                        if 'events' in data:
+                            segments = []
+                            full_text_parts = []
+                            for event in data['events']:
+                                if 'segs' in event:
+                                    text = ''.join(seg.get('utf8', '') for seg in event['segs'])
+                                    start = event.get('tStartMs', 0) / 1000.0
+                                    duration = event.get('dDurationMs', 0) / 1000.0
+                                    if text:
+                                        segment = TranscriptSegment(start_time=start, duration=duration, text=text)
+                                        segments.append(segment)
+                                        full_text_parts.append(text)
+                            
+                            if segments:
+                                full_text = ' '.join(full_text_parts).strip()
+                                logger.info(f"Fetched transcript for {video_id} via timedtext srv3 format")
+                                return VideoTranscript(
+                                    video_id=video_id,
+                                    language=lang,
+                                    segments=segments,
+                                    full_text=full_text,
+                                )
+                    except json.JSONDecodeError:
+                        pass
+                
+                # Try legacy XML format
                 url = f"https://video.google.com/timedtext?lang={lang}&v={video_id}"
-                logger.debug(f"Attempting timedtext fetch for {video_id} using {lang}")
-                resp = requests.get(url, timeout=10)
+                logger.debug(f"Attempting legacy timedtext fetch for {video_id} using {lang}")
+                resp = requests.get(url, headers=headers, timeout=10)
                 if resp.status_code != 200 or not resp.text.strip():
                     continue
 
@@ -418,7 +623,7 @@ class YouTubeService:
 
                 full_text = ' '.join(full_text_parts).strip()
                 if full_text:
-                    logger.info(f"Fetched transcript for {video_id} via timedtext")
+                    logger.info(f"Fetched transcript for {video_id} via legacy timedtext")
                     return VideoTranscript(
                         video_id=video_id,
                         language=lang,
@@ -429,6 +634,122 @@ class YouTubeService:
                 logger.debug(f"Timedtext fetch failed for {video_id} lang {lang}: {e}")
                 continue
 
+        return None
+    
+    async def _fetch_transcript_innertube(self, video_id: str) -> Optional[VideoTranscript]:
+        """Fetch transcript using YouTube's innertube API (what the player uses)"""
+        import requests
+        import json
+        
+        try:
+            # First, get the page to extract necessary data
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+            }
+            
+            page_url = f"https://www.youtube.com/watch?v={video_id}"
+            logger.debug(f"Fetching YouTube page for {video_id} to get innertube data")
+            
+            resp = requests.get(page_url, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                logger.debug(f"Failed to fetch YouTube page: {resp.status_code}")
+                return None
+            
+            # Extract the initial data from the page
+            import re
+            ytInitialData_match = re.search(r'var ytInitialData = ({.*?});', resp.text)
+            if not ytInitialData_match:
+                logger.debug("Could not find ytInitialData in page")
+                return None
+                
+            try:
+                yt_data = json.loads(ytInitialData_match.group(1))
+            except json.JSONDecodeError:
+                logger.debug("Failed to parse ytInitialData")
+                return None
+            
+            # Look for caption tracks in the player response
+            captions = None
+            try:
+                # Navigate through the nested structure
+                captions = (yt_data.get('playerOverlays', {})
+                           .get('playerOverlayRenderer', {})
+                           .get('videoDetails', {})
+                           .get('playerVideoDetailsRenderer', {})
+                           .get('subtitle', {})
+                           .get('playerSubtitleRenderer', {})
+                           .get('trackList', []))
+            except:
+                pass
+                
+            if not captions:
+                # Try alternative path
+                try:
+                    player_response_str = re.search(r'"playerResponse":"({.*?})"', resp.text)
+                    if player_response_str:
+                        # Unescape the JSON string
+                        player_response = json.loads(player_response_str.group(1).replace('\\"', '"').replace('\\\\', '\\'))
+                        captions = (player_response.get('captions', {})
+                                   .get('playerCaptionsTracklistRenderer', {})
+                                   .get('captionTracks', []))
+                except:
+                    pass
+            
+            if not captions:
+                logger.debug("No caption tracks found in page data")
+                return None
+            
+            # Find English caption track
+            caption_url = None
+            for track in captions:
+                if track.get('languageCode', '').startswith('en'):
+                    caption_url = track.get('baseUrl')
+                    if caption_url:
+                        break
+            
+            if not caption_url:
+                logger.debug("No English caption track found")
+                return None
+            
+            # Fetch the actual captions
+            logger.debug(f"Fetching captions from: {caption_url}")
+            caption_resp = requests.get(caption_url, headers=headers, timeout=10)
+            if caption_resp.status_code != 200:
+                logger.debug(f"Failed to fetch captions: {caption_resp.status_code}")
+                return None
+            
+            # Parse the caption data (usually in XML format)
+            import xml.etree.ElementTree as ET
+            import html
+            
+            root = ET.fromstring(caption_resp.text)
+            segments = []
+            full_text_parts = []
+            
+            for elem in root.findall('.//text'):
+                start = float(elem.attrib.get('start', '0'))
+                dur = float(elem.attrib.get('dur', '0'))
+                text = html.unescape(elem.text or '')
+                if text:
+                    segment = TranscriptSegment(start_time=start, duration=dur, text=text)
+                    segments.append(segment)
+                    full_text_parts.append(text)
+            
+            if segments:
+                full_text = ' '.join(full_text_parts).strip()
+                logger.info(f"Successfully fetched transcript via innertube for {video_id}")
+                return VideoTranscript(
+                    video_id=video_id,
+                    language='en',
+                    segments=segments,
+                    full_text=full_text,
+                )
+            
+        except Exception as e:
+            logger.debug(f"Innertube transcript fetch failed: {type(e).__name__}: {e}")
+        
         return None
     
     async def _fetch_transcript_with_retries(self, video_id: str) -> Optional[VideoTranscript]:
@@ -531,14 +852,30 @@ class YouTubeService:
             except Exception as e:
                 logger.debug(f"No manually created English transcript: {e}")
                 
-            # 2. Try auto-generated English
+            # 2. Try auto-generated English - use a more flexible approach
             if not transcript:
                 try:
+                    # First try the standard approach
                     transcript = transcript_list.find_generated_transcript(['en', 'en-US', 'en-GB'])
                     language_used = transcript.language_code
                     logger.info(f"Found auto-generated English transcript for {video_id} ({language_used})")
                 except Exception as e:
-                    logger.debug(f"No auto-generated English transcript: {e}")
+                    logger.debug(f"Standard auto-generated English search failed: {e}")
+                    # Try finding any English transcript by checking available transcripts directly
+                    for available in available_transcripts:
+                        if available['language_code'] == 'en' and available['is_generated']:
+                            try:
+                                # Get transcript directly by language code
+                                for t in transcript_list:
+                                    if t.language_code == 'en':
+                                        transcript = t
+                                        language_used = 'en'
+                                        logger.info(f"Found English transcript via direct search for {video_id}")
+                                        break
+                                if transcript:
+                                    break
+                            except Exception as e2:
+                                logger.debug(f"Direct English transcript fetch failed: {e2}")
                     
             # 3. Try any manually created transcript
             if not transcript:
