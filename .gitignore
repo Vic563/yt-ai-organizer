@@ -151,3 +151,6 @@ venv.bak/
 
 # Claude AI files
 CLAUDE.md
+
+# Markdown files
+*.md
