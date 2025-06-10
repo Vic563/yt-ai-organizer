@@ -1,4 +1,4 @@
-# Project Insight
+# Youtube Organizer
 
 **Your Conversational AI Partner for YouTube Library Exploration**
 
