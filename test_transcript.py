@@ -20,66 +20,52 @@ async def test_transcript_fetch():
     # Initialize YouTube service
     youtube_service = YouTubeService(settings.youtube_api_key)
     
-    # Test video ID that should have a transcript
-    video_id = "000yxkGXSVM"  # The video from your screenshot
+    # Test multiple video IDs with different characteristics
+    test_videos = [
+        "o7aQhb-PK08",  # The specific video user is trying
+        "dQw4w9WgXcQ",  # Rick Roll - popular, old video
+        "9bZkp7q19f0",  # PSY - Gangnam Style - extremely popular
+        "kJQP7kiw5Fk",  # Despacito - very popular
+        "000yxkGXSVM",  # Original video from screenshot
+    ]
     
-    logger.info(f"Testing transcript fetch for video: {video_id}")
-    logger.info(f"Video URL: https://www.youtube.com/watch?v={video_id}")
-    
-    try:
-        # Test each strategy individually
-        logger.info("=" * 50)
-        logger.info("TESTING STRATEGY 1: Basic with retries")
-        logger.info("=" * 50)
+    # Test each video with smart retry logic
+    for i, video_id in enumerate(test_videos):
+        logger.info("=" * 80)
+        logger.info(f"TESTING VIDEO {i+1}/{len(test_videos)}: {video_id}")
+        logger.info(f"Video URL: https://www.youtube.com/watch?v={video_id}")
+        logger.info("=" * 80)
         
-        result1 = await youtube_service._fetch_transcript_with_retries(video_id)
-        if result1:
-            logger.info(f"Strategy 1 SUCCESS: {len(result1.segments)} segments, language: {result1.language}")
-        else:
-            logger.info("Strategy 1 FAILED: No transcript returned")
-            
-    except Exception as e:
-        logger.error(f"Strategy 1 ERROR: {type(e).__name__}: {e}")
-    
-    try:
-        logger.info("=" * 50)
-        logger.info("TESTING STRATEGY 2: Enhanced headers")
-        logger.info("=" * 50)
+        try:
+            # Test the main method with all strategies
+            result = await youtube_service.get_video_transcript(video_id)
+            if result:
+                logger.info(f"SUCCESS for {video_id}: {len(result.segments)} segments, language: {result.language}")
+                logger.info(f"First 200 characters: {result.full_text[:200]}...")
+                
+                # If we found a working video, note it for future reference
+                logger.info(f"*** WORKING VIDEO FOUND: {video_id} ***")
+                
+                # Test a few more to see pattern
+                if i < 2:  # Test first 3 videos thoroughly
+                    continue
+                else:
+                    logger.info("Found working video, continuing with remaining tests...")
+                    
+            else:
+                logger.warning(f"FAILED for {video_id}: No transcript returned")
+                
+        except Exception as e:
+            logger.error(f"ERROR for {video_id}: {type(e).__name__}: {e}")
         
-        result2 = await youtube_service._fetch_transcript_with_proxy_headers(video_id)
-        if result2:
-            logger.info(f"Strategy 2 SUCCESS: {len(result2.segments)} segments, language: {result2.language}")
-        else:
-            logger.info("Strategy 2 FAILED: No transcript returned")
-            
-    except Exception as e:
-        logger.error(f"Strategy 2 ERROR: {type(e).__name__}: {e}")
+        # Add delay between videos to avoid rate limiting
+        if i < len(test_videos) - 1:
+            logger.info("Waiting 3 seconds before next video...")
+            await asyncio.sleep(3)
     
-    try:
-        logger.info("=" * 50)
-        logger.info("TESTING STRATEGY 3: Basic fallback")
-        logger.info("=" * 50)
-        
-        result3 = await youtube_service._fetch_transcript_basic(video_id)
-        if result3:
-            logger.info(f"Strategy 3 SUCCESS: {len(result3.segments)} segments, language: {result3.language}")
-        else:
-            logger.info("Strategy 3 FAILED: No transcript returned")
-            
-    except Exception as e:
-        logger.error(f"Strategy 3 ERROR: {type(e).__name__}: {e}")
-    
-    logger.info("=" * 50)
-    logger.info("TESTING MAIN METHOD")
-    logger.info("=" * 50)
-    
-    # Test the main method
-    result = await youtube_service.get_video_transcript(video_id)
-    if result:
-        logger.info(f"MAIN METHOD SUCCESS: {len(result.segments)} segments, language: {result.language}")
-        logger.info(f"First 200 characters: {result.full_text[:200]}...")
-    else:
-        logger.error("MAIN METHOD FAILED: No transcript returned")
+    # Cleanup
+    youtube_service.cleanup()
+    logger.info("Test completed and resources cleaned up")
 
 if __name__ == "__main__":
     asyncio.run(test_transcript_fetch())

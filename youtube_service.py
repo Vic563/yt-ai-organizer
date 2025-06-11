@@ -12,6 +12,7 @@ from database import get_db_connection, insert_video, update_video_transcript_st
 from models import VideoMetadata, VideoTranscript, TranscriptSegment
 from topic_service import TopicExtractor, TopicManager
 from simple_transcript_fetcher import SimpleTranscriptFetcher
+from browser_transcript_fetcher import BrowserTranscriptFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ class YouTubeService:
         self.youtube = build('youtube', 'v3', developerKey=api_key)
         self.settings = get_settings()
         self.transcript_fetcher = SimpleTranscriptFetcher()
+        self.browser_fetcher = None  # Initialize browser fetcher lazily
         
         # Initialize topic extractor if Gemini API key is provided
         self.topic_extractor = None
@@ -94,14 +96,10 @@ class YouTubeService:
                     result["message"] += f" with transcript ({len(transcript.full_text)} characters)"
                     transcript_text = transcript.full_text
                 else:
-                    # Log more details about the failure
-                    logger.warning(f"Could not fetch transcript for {video_id}. This may be due to:")
-                    logger.warning("- YouTube rate limiting or blocking requests")
-                    logger.warning("- Video has restricted access or is private")
-                    logger.warning("- Transcripts are disabled for this video")
-                    logger.warning("- Temporary network issues")
+                    # Enhanced user-friendly error messaging
+                    logger.warning(f"Could not fetch transcript for {video_id} after trying multiple methods")
                     update_video_transcript_status(video_id, False)
-                    result["message"] += " (transcript temporarily unavailable - try refreshing later)"
+                    result["message"] += " (transcript unavailable - YouTube may be blocking automated requests)"
                 
                 # Extract and assign topic if extractor is available (works with or without transcript)
                 if self.topic_extractor:
@@ -455,22 +453,29 @@ class YouTubeService:
         except Exception as e:
             logger.debug(f"Strategy 5 FAILED: Innertube API error: {type(e).__name__}: {e}")
 
-        # All strategies failed
-        logger.warning(f"All transcript fetching strategies failed for video {video_id}")
-        logger.warning("TRANSCRIPT FETCHING ISSUE ANALYSIS:")
-        logger.warning("YouTube has implemented sophisticated anti-bot protection that blocks automated transcript requests.")
-        logger.warning("Even though we can successfully:")
-        logger.warning("- Load video pages")
-        logger.warning("- Extract caption track information")
-        logger.warning("- Get transcript URLs")
-        logger.warning("YouTube returns empty responses (HTTP 200 but no content) for all transcript downloads.")
-        logger.warning("")
-        logger.warning("POSSIBLE SOLUTIONS:")
-        logger.warning("1. Use a different video that may have less protection")
-        logger.warning("2. Try again later (YouTube's blocking may be temporary)")
-        logger.warning("3. Use manual transcript extraction (copy/paste from YouTube)")
-        logger.warning("4. Consider using a proxy service or different IP address")
-        logger.warning("5. For development, use pre-downloaded transcript files")
+        # Strategy 6: Browser automation as last resort (optional)
+        try:
+            logger.debug("Strategy 6: Using browser automation (Selenium)")
+            if not self.browser_fetcher:
+                try:
+                    self.browser_fetcher = BrowserTranscriptFetcher()
+                except Exception as browser_init_error:
+                    logger.debug(f"Browser automation not available: {browser_init_error}")
+                    self.browser_fetcher = None
+            
+            if self.browser_fetcher and self.browser_fetcher.driver:
+                transcript = await self.browser_fetcher.fetch_transcript(video_id)
+                if transcript:
+                    logger.info(f"Strategy 6 SUCCESS: Fetched transcript using browser automation - {len(transcript.segments)} segments, {len(transcript.full_text)} characters")
+                    return transcript
+            else:
+                logger.debug("Browser automation not available, skipping strategy 6")
+        except Exception as e:
+            logger.debug(f"Strategy 6 FAILED: Browser automation error: {type(e).__name__}: {e}")
+
+        # All strategies failed - provide concise logging
+        logger.warning(f"All 6 transcript fetching strategies failed for video {video_id}")
+        logger.info("YouTube's anti-bot protection is blocking all automated transcript requests.")
 
         return None
 
@@ -972,3 +977,18 @@ class YouTubeService:
         except Exception as e:
             logger.error(f"Failed to load transcript for {video_id}: {e}")
         return None
+    
+    def cleanup(self):
+        """Clean up resources, especially browser automation"""
+        if self.browser_fetcher and hasattr(self.browser_fetcher, 'cleanup'):
+            try:
+                self.browser_fetcher.cleanup()
+                logger.info("Cleaned up browser transcript fetcher")
+            except Exception as e:
+                logger.error(f"Error cleaning up browser fetcher: {e}")
+            finally:
+                self.browser_fetcher = None
+    
+    def __del__(self):
+        """Ensure cleanup on object destruction"""
+        self.cleanup()

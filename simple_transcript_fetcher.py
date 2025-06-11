@@ -5,16 +5,20 @@ import logging
 import re
 import json
 import time
+import random
+import asyncio
 import requests
 from typing import Optional
 from models import VideoTranscript, TranscriptSegment
+from proxy_manager import proxy_manager
 
 logger = logging.getLogger(__name__)
 
 class SimpleTranscriptFetcher:
     """Simple transcript fetcher that mimics browser behavior"""
     
-    def __init__(self):
+    def __init__(self, use_proxy: bool = True):
+        self.use_proxy = use_proxy
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
@@ -69,12 +73,9 @@ class SimpleTranscriptFetcher:
                 logger.debug(f"Trying caption track: {track_name} ({lang_code})")
 
                 try:
-                    # Add a small delay to avoid being blocked
-                    time.sleep(1)
-
-                    caption_response = self.session.get(base_url, timeout=10)
-                    if caption_response.status_code != 200:
-                        logger.debug(f"Failed to fetch captions for {lang_code}: {caption_response.status_code}")
+                    # Fetch captions with exponential backoff retry
+                    caption_response = await self._fetch_with_exponential_backoff(base_url, lang_code)
+                    if not caption_response:
                         continue
 
                     caption_text = caption_response.text
@@ -276,4 +277,73 @@ class SimpleTranscriptFetcher:
         except Exception as e:
             logger.debug(f"Error parsing JSON captions: {e}")
 
+        return None
+    
+    async def _fetch_with_exponential_backoff(self, url: str, lang_code: str, max_retries: int = 3) -> Optional[requests.Response]:
+        """Fetch URL with exponential backoff retry logic and optional proxy rotation"""
+        for attempt in range(max_retries):
+            try:
+                # Calculate delay: 1s, 2s, 4s + random jitter
+                if attempt > 0:
+                    delay = (2 ** attempt) + random.uniform(0.5, 1.5)
+                    logger.debug(f"Retrying {lang_code} after {delay:.1f}s delay (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(delay)
+                
+                # Use proxy session if enabled and proxies are available
+                session_to_use = self.session
+                if self.use_proxy and attempt > 0:  # Use proxy on retries
+                    try:
+                        await proxy_manager.refresh_working_proxies()
+                        if proxy_manager.working_proxies:
+                            session_to_use = proxy_manager.get_proxy_session()
+                            logger.debug(f"Using proxy for retry attempt {attempt + 1}")
+                    except Exception as e:
+                        logger.debug(f"Failed to get proxy session: {e}")
+                
+                # Enhanced headers to look more like a real browser
+                enhanced_headers = {
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'DNT': '1',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'same-origin',
+                    'Sec-Fetch-User': '?1',
+                    'Cache-Control': 'max-age=0'
+                }
+                
+                # Update session headers for this request
+                old_headers = session_to_use.headers.copy()
+                session_to_use.headers.update(enhanced_headers)
+                
+                try:
+                    response = session_to_use.get(url, timeout=15)
+                    if response.status_code == 200 and response.text:
+                        logger.debug(f"Successfully fetched captions for {lang_code} on attempt {attempt + 1}")
+                        return response
+                    else:
+                        logger.debug(f"Failed to fetch captions for {lang_code}: HTTP {response.status_code}, content length: {len(response.text)}")
+                        
+                        # If using proxy and got bad response, report proxy failure
+                        if session_to_use != self.session and hasattr(session_to_use, 'proxies'):
+                            proxy_manager.report_proxy_failure(session_to_use.proxies)
+                            
+                finally:
+                    # Restore original headers
+                    session_to_use.headers = old_headers
+                    
+            except Exception as e:
+                logger.debug(f"Error fetching captions for {lang_code} (attempt {attempt + 1}): {type(e).__name__}: {e}")
+                
+                # If using proxy and got error, report proxy failure
+                if session_to_use != self.session and hasattr(session_to_use, 'proxies'):
+                    proxy_manager.report_proxy_failure(session_to_use.proxies)
+                
+                if attempt == max_retries - 1:
+                    logger.debug(f"All retry attempts failed for {lang_code}")
+                    
         return None

@@ -13,6 +13,8 @@ youtube-transcript-api==0.6.1
 requests==2.31.0
 yt-dlp==2024.5.27
 reportlab==4.0.7
+selenium==4.15.2
+webdriver-manager==4.0.1
 
 # Security
 pyjwt==2.8.0
