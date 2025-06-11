@@ -13,6 +13,7 @@ from models import VideoMetadata, VideoTranscript, TranscriptSegment
 from topic_service import TopicExtractor, TopicManager
 from simple_transcript_fetcher import SimpleTranscriptFetcher
 from browser_transcript_fetcher import BrowserTranscriptFetcher
+from oauth_transcript_fetcher import OAuthTranscriptFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ class YouTubeService:
         self.settings = get_settings()
         self.transcript_fetcher = SimpleTranscriptFetcher()
         self.browser_fetcher = None  # Initialize browser fetcher lazily
+        self.oauth_fetcher = OAuthTranscriptFetcher()  # OAuth-based fetcher (most reliable)
         
         # Initialize topic extractor if Gemini API key is provided
         self.topic_extractor = None
@@ -401,6 +403,20 @@ class YouTubeService:
         """Get transcript for a specific video using multiple fallback strategies"""
         logger.info(f"Attempting to fetch transcript for video: {video_id}")
 
+        # Strategy 0: OAuth YouTube Data API (MOST RELIABLE - bypasses all anti-bot protection)
+        try:
+            logger.debug("Strategy 0: Using OAuth YouTube Data API (Official)")
+            if self.oauth_fetcher.is_authenticated():
+                transcript = await self.oauth_fetcher.fetch_transcript(video_id)
+                if transcript:
+                    logger.info(f"Strategy 0 SUCCESS: Fetched transcript using OAuth API - {len(transcript.segments)} segments, {len(transcript.full_text)} characters")
+                    return transcript
+            else:
+                logger.debug("OAuth not authenticated, skipping Strategy 0")
+                logger.info("To enable OAuth transcript fetching, run: setup_oauth_authentication()")
+        except Exception as e:
+            logger.debug(f"Strategy 0 FAILED: OAuth API error: {type(e).__name__}: {e}")
+
         # Strategy 1: Use SimpleTranscriptFetcher (browser-like approach)
         try:
             logger.debug("Strategy 1: Using SimpleTranscriptFetcher")
@@ -474,8 +490,11 @@ class YouTubeService:
             logger.debug(f"Strategy 6 FAILED: Browser automation error: {type(e).__name__}: {e}")
 
         # All strategies failed - provide concise logging
-        logger.warning(f"All 6 transcript fetching strategies failed for video {video_id}")
-        logger.info("YouTube's anti-bot protection is blocking all automated transcript requests.")
+        logger.warning(f"All 7 transcript fetching strategies failed for video {video_id}")
+        logger.info("YouTube's anti-bot protection is blocking automated transcript requests.")
+        if not self.oauth_fetcher.is_authenticated():
+            logger.info("💡 TIP: Set up OAuth authentication for 99% reliable transcript access!")
+            logger.info("Run: youtube_service.setup_oauth_authentication()")
 
         return None
 
@@ -992,3 +1011,48 @@ class YouTubeService:
     def __del__(self):
         """Ensure cleanup on object destruction"""
         self.cleanup()
+    
+    # OAuth Authentication Methods
+    
+    def setup_oauth_authentication(self, client_secrets_path: Optional[str] = None) -> bool:
+        """
+        Set up OAuth authentication for reliable transcript access
+        
+        Args:
+            client_secrets_path: Path to client_secret.json (optional)
+            
+        Returns:
+            bool: True if authentication successful
+        """
+        logger.info("Setting up OAuth authentication for YouTube transcript access...")
+        logger.info(self.oauth_fetcher.setup_instructions())
+        
+        return self.oauth_fetcher.authenticate(client_secrets_path)
+    
+    def is_oauth_authenticated(self) -> bool:
+        """Check if OAuth authentication is set up and valid"""
+        return self.oauth_fetcher.is_authenticated()
+    
+    def get_oauth_status(self) -> Dict[str, Any]:
+        """Get OAuth authentication status and information"""
+        return {
+            "authenticated": self.oauth_fetcher.is_authenticated(),
+            "credentials_valid": (
+                self.oauth_fetcher.credentials and 
+                self.oauth_fetcher.credentials.valid
+            ) if self.oauth_fetcher.credentials else False,
+            "service_available": self.oauth_fetcher.youtube_service is not None,
+            "setup_instructions": "Run setup_oauth_authentication() method"
+        }
+    
+    async def get_available_captions_oauth(self, video_id: str) -> List[Dict[str, Any]]:
+        """Get available caption tracks using OAuth API"""
+        return self.oauth_fetcher.get_available_captions(video_id)
+    
+    async def force_oauth_transcript(self, video_id: str) -> Optional[VideoTranscript]:
+        """Force transcript fetch using only OAuth method"""
+        if not self.oauth_fetcher.is_authenticated():
+            logger.error("OAuth authentication required. Run setup_oauth_authentication() first.")
+            return None
+        
+        return await self.oauth_fetcher.fetch_transcript(video_id)

@@ -318,6 +318,110 @@ async def retry_all_missing_transcripts(
         logger.error(f"Error retrying all transcript fetches: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to retry transcript fetches: {str(e)}")
 
+# OAuth Authentication endpoints for transcript access
+@app.get("/api/oauth/status")
+async def get_oauth_status(current_user: Dict[str, Any] = Depends(get_current_active_user)):
+    """Get OAuth authentication status for transcript access"""
+    if not youtube_service:
+        raise HTTPException(status_code=400, detail="YouTube service not configured")
+    
+    try:
+        status = youtube_service.get_oauth_status()
+        return status
+    except Exception as e:
+        logger.error(f"Error getting OAuth status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get OAuth status: {str(e)}")
+
+@app.get("/api/oauth/setup-instructions")
+async def get_oauth_setup_instructions(current_user: Dict[str, Any] = Depends(get_current_active_user)):
+    """Get OAuth setup instructions"""
+    if not youtube_service:
+        raise HTTPException(status_code=400, detail="YouTube service not configured")
+    
+    try:
+        instructions = youtube_service.oauth_fetcher.setup_instructions()
+        return {"instructions": instructions}
+    except Exception as e:
+        logger.error(f"Error getting OAuth instructions: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get OAuth instructions: {str(e)}")
+
+@app.post("/api/oauth/authenticate")
+async def setup_oauth_authentication(
+    current_user: Dict[str, Any] = Depends(get_admin_user)
+):
+    """Set up OAuth authentication (admin only)"""
+    if not youtube_service:
+        raise HTTPException(status_code=400, detail="YouTube service not configured")
+    
+    try:
+        logger.info(f"Admin user {current_user['username']} setting up OAuth authentication")
+        success = youtube_service.setup_oauth_authentication()
+        
+        if success:
+            return {
+                "success": True, 
+                "message": "OAuth authentication set up successfully! Transcript fetching will now use official YouTube API."
+            }
+        else:
+            return {
+                "success": False, 
+                "message": "OAuth authentication failed. Please check the setup instructions and ensure client_secret.json is properly configured."
+            }
+    except Exception as e:
+        logger.error(f"Error setting up OAuth authentication: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to set up OAuth authentication: {str(e)}")
+
+@app.get("/api/videos/{video_id}/captions")
+async def get_available_captions(
+    video_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
+    """Get available caption tracks for a video using OAuth"""
+    if not youtube_service:
+        raise HTTPException(status_code=400, detail="YouTube service not configured")
+    
+    try:
+        captions = await youtube_service.get_available_captions_oauth(video_id)
+        return {"captions": captions}
+    except Exception as e:
+        logger.error(f"Error getting available captions for {video_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get available captions: {str(e)}")
+
+@app.post("/api/videos/{video_id}/transcript-oauth")
+async def force_oauth_transcript_fetch(
+    video_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
+    """Force transcript fetch using OAuth method only"""
+    if not youtube_service:
+        raise HTTPException(status_code=400, detail="YouTube service not configured")
+    
+    try:
+        logger.info(f"Force fetching transcript via OAuth for video: {video_id}")
+        transcript = await youtube_service.force_oauth_transcript(video_id)
+        
+        if transcript:
+            # Update database
+            from database import update_video_transcript_status
+            youtube_service._save_transcript_to_file(video_id, transcript.full_text)
+            update_video_transcript_status(video_id, True, transcript.language)
+            
+            return {
+                "success": True,
+                "message": f"Transcript fetched successfully via OAuth ({len(transcript.segments)} segments)",
+                "transcript_length": len(transcript.full_text),
+                "language": transcript.language,
+                "segments": len(transcript.segments)
+            }
+        else:
+            return {
+                "success": False,
+                "message": "No transcript available via OAuth. Video may not have captions or they may be download-restricted."
+            }
+    except Exception as e:
+        logger.error(f"Error force fetching OAuth transcript for {video_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch transcript via OAuth: {str(e)}")
+
 @app.get("/api/library/stats")
 async def get_library_stats(current_user: Dict[str, Any] = Depends(get_current_active_user)):
     """Get library statistics"""
