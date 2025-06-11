@@ -38,7 +38,7 @@ const Login = ({ onLogin }) => {
   return (
     <div className="login-container">
       <div className="login-card">
-        <h2>Login to YouTube AI Organizer</h2>
+        <h2>Login to YouTube Organizer</h2>
         
         {error && (
           <div className="error-message">

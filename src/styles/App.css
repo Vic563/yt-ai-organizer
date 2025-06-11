@@ -119,6 +119,46 @@ body {
 .header-right {
   display: flex;
   gap: 0.5rem;
+  align-items: center;
+}
+
+/* User display in header */
+.user-display {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-right: 0.25rem;
+  transition: all 0.2s ease;
+}
+
+.user-display:hover {
+  background: var(--accent-color);
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+
+.user-display svg {
+  color: var(--accent-color);
+  transition: color 0.2s ease;
+}
+
+.user-display:hover svg {
+  color: white;
+}
+
+.user-display .username {
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .app-main {
@@ -1061,6 +1101,15 @@ body {
 
   .header-left h1 {
     font-size: 1.25rem;
+  }
+
+  .user-display .username {
+    display: none;
+  }
+
+  .user-display {
+    padding: 0.5rem;
+    margin-right: 0.125rem;
   }
 
   .chat-messages {

@@ -9,7 +9,7 @@ import Login from './components/Login';
 import Register from './components/Register';
 import PrivateRoute from './components/PrivateRoute';
 import { useChatStore } from './hooks/useChat';
-import { Settings, MessageCircle, Video, Sun, Moon, Folder, BarChart2, LogOut } from 'lucide-react';
+import { Settings, MessageCircle, Video, Sun, Moon, Folder, BarChart2, LogOut, User } from 'lucide-react';
 import { checkConfiguration } from './services/api';
 import auth from './services/auth';
 
@@ -21,6 +21,7 @@ function App() {
   const [isConfigured, setIsConfigured] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [isAuthenticated, setIsAuthenticated] = useState(auth.isAuthenticated())
+  const [currentUser, setCurrentUser] = useState(null)
   const [isDarkMode, setIsDarkMode] = useState(() => {
     // Check localStorage or system preference
     const saved = localStorage.getItem('darkMode')
@@ -34,8 +35,10 @@ function App() {
   useEffect(() => {
     if (isAuthenticated) {
       checkConfig()
+      fetchCurrentUser()
     } else {
       setIsLoading(false)
+      setCurrentUser(null)
     }
   }, [isAuthenticated])
 
@@ -49,9 +52,20 @@ function App() {
     setIsDarkMode(!isDarkMode)
   }
 
+  const fetchCurrentUser = async () => {
+    try {
+      const user = await auth.getCurrentUser()
+      setCurrentUser(user)
+    } catch (error) {
+      console.error('Failed to fetch current user:', error)
+      setCurrentUser(null)
+    }
+  }
+
   const handleLogout = async () => {
     await auth.logout()
     setIsAuthenticated(false)
+    setCurrentUser(null)
     clearChat()
     navigate('/login')
   }
@@ -166,6 +180,12 @@ function App() {
             >
               <BarChart2 size={20} />
             </Link>
+            {isAuthenticated && currentUser && (
+              <div className="user-display" title={`Logged in as ${currentUser.username}`}>
+                <User size={16} />
+                <span className="username">{currentUser.username}</span>
+              </div>
+            )}
             {isAuthenticated && (
               <button
                 className="btn-icon"
