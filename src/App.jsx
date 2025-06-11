@@ -5,9 +5,13 @@ import ConfigPanel from './components/ConfigPanel';
 import VideoLibrary from './components/VideoLibrary';
 import TopicsPage from './pages/TopicsPage';
 import PerformancePage from './pages/PerformancePage';
+import Login from './components/Login';
+import Register from './components/Register';
+import PrivateRoute from './components/PrivateRoute';
 import { useChatStore } from './hooks/useChat';
-import { Settings, MessageCircle, Video, Sun, Moon, Folder, BarChart2 } from 'lucide-react';
+import { Settings, MessageCircle, Video, Sun, Moon, Folder, BarChart2, LogOut } from 'lucide-react';
 import { checkConfiguration } from './services/api';
+import auth from './services/auth';
 
 function App() {
   const location = useLocation();
@@ -16,6 +20,7 @@ function App() {
   const [showLibrary, setShowLibrary] = useState(false)
   const [isConfigured, setIsConfigured] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [isAuthenticated, setIsAuthenticated] = useState(auth.isAuthenticated())
   const [isDarkMode, setIsDarkMode] = useState(() => {
     // Check localStorage or system preference
     const saved = localStorage.getItem('darkMode')
@@ -27,8 +32,12 @@ function App() {
   const { clearChat } = useChatStore()
 
   useEffect(() => {
-    checkConfig()
-  }, [])
+    if (isAuthenticated) {
+      checkConfig()
+    } else {
+      setIsLoading(false)
+    }
+  }, [isAuthenticated])
 
   useEffect(() => {
     // Apply theme to document
@@ -38,6 +47,13 @@ function App() {
 
   const toggleTheme = () => {
     setIsDarkMode(!isDarkMode)
+  }
+
+  const handleLogout = async () => {
+    await auth.logout()
+    setIsAuthenticated(false)
+    clearChat()
+    navigate('/login')
   }
 
   // Removed duplicate useEffect
@@ -150,31 +166,60 @@ function App() {
             >
               <BarChart2 size={20} />
             </Link>
+            {isAuthenticated && (
+              <button
+                className="btn-icon"
+                onClick={handleLogout}
+                title="Logout"
+              >
+                <LogOut size={20} />
+              </button>
+            )}
           </div>
         </header>
       ) : null}
 
       <main className="app-main">
         <Routes>
+          <Route path="/login" element={
+            <Login onLogin={() => setIsAuthenticated(true)} />
+          } />
+          <Route path="/register" element={<Register />} />
           <Route path="/config" element={
-            <ConfigPanel 
-              onClose={() => navigate('/')} 
-              onConfigured={async () => {
-                setIsConfigured(true);
-                setShowConfig(false);
-                // Reload configuration status
-                await checkConfig();
-                // Navigate to home page
-                navigate('/');
-              }} 
-            />
+            <PrivateRoute>
+              <ConfigPanel 
+                onClose={() => navigate('/')} 
+                onConfigured={async () => {
+                  setIsConfigured(true);
+                  setShowConfig(false);
+                  // Reload configuration status
+                  await checkConfig();
+                  // Navigate to home page
+                  navigate('/');
+                }} 
+              />
+            </PrivateRoute>
           } />
-          <Route path="/topics/*" element={<TopicsPage />} />
-          <Route path="/performance" element={<PerformancePage />} />
+          <Route path="/topics/*" element={
+            <PrivateRoute>
+              <TopicsPage />
+            </PrivateRoute>
+          } />
+          <Route path="/performance" element={
+            <PrivateRoute>
+              <PerformancePage />
+            </PrivateRoute>
+          } />
           <Route path="/library" element={
-            <VideoLibrary onClose={() => setShowLibrary(false)} />
+            <PrivateRoute>
+              <VideoLibrary onClose={() => setShowLibrary(false)} />
+            </PrivateRoute>
           } />
-          <Route path="/" element={<ChatInterface />} />
+          <Route path="/" element={
+            <PrivateRoute>
+              <ChatInterface />
+            </PrivateRoute>
+          } />
         </Routes>
       </main>
       <footer style={{ textAlign: 'center', padding: '20px', fontSize: '0.9em', color: 'var(--text-color-secondary)' }}>Created by Victor Reyes</footer>

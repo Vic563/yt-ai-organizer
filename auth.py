@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr, validator
+from pydantic import BaseModel, EmailStr, field_validator
 import sqlite3
 import os
 from security import (
@@ -21,13 +21,15 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     
-    @validator('username')
+    @field_validator('username')
+    @classmethod
     def username_alphanumeric(cls, v):
         assert v.isalnum(), 'must be alphanumeric'
         assert len(v) >= 3, 'must be at least 3 characters'
         return v
     
-    @validator('password')
+    @field_validator('password')
+    @classmethod
     def password_strength(cls, v):
         assert len(v) >= 8, 'must be at least 8 characters'
         return v
@@ -111,7 +113,7 @@ def authenticate_user(username: str, password: str) -> Optional[Dict[str, Any]]:
     
     try:
         cursor.execute(
-            """SELECT id, username, email, hashed_password, is_active, is_admin 
+            """SELECT id, username, email, hashed_password, is_active, is_admin, created_at 
                FROM users WHERE username = ? OR email = ?""",
             (username, username)  # Allow login with email or username
         )
@@ -131,7 +133,8 @@ def authenticate_user(username: str, password: str) -> Optional[Dict[str, Any]]:
             "username": user[1],
             "email": user[2],
             "is_active": bool(user[4]),
-            "is_admin": bool(user[5])
+            "is_admin": bool(user[5]),
+            "created_at": user[6]
         }
     finally:
         conn.close()
@@ -169,7 +172,7 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any]:
         
         # Get user details
         cursor.execute(
-            """SELECT id, username, email, is_active, is_admin 
+            """SELECT id, username, email, is_active, is_admin, created_at 
                FROM users WHERE username = ?""",
             (username,)
         )
@@ -183,7 +186,8 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any]:
             "username": user[1],
             "email": user[2],
             "is_active": bool(user[3]),
-            "is_admin": bool(user[4])
+            "is_admin": bool(user[4]),
+            "created_at": user[5]
         }
     finally:
         conn.close()

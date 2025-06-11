@@ -154,3 +154,4 @@ CLAUDE.md
 
 # Markdown files
 *.md
+.opencode.json

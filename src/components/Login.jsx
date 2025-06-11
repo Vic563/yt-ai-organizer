@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import auth from '../services/auth'
 import './Login.css'
 
-const Login = () => {
+const Login = ({ onLogin }) => {
   const navigate = useNavigate()
   const [formData, setFormData] = useState({
     username: '',
@@ -26,6 +26,7 @@ const Login = () => {
 
     try {
       await auth.login(formData.username, formData.password)
+      if (onLogin) onLogin()
       navigate('/')
     } catch (err) {
       setError(err.response?.data?.detail || 'Login failed. Please try again.')

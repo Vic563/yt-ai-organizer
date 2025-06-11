@@ -1,12 +1,10 @@
-import axios from 'axios';
-
-const API_BASE_URL = '/api';
+import api from './api.js';
 
 export const topicService = {
   // Get all topics with video counts
   async getTopics() {
     try {
-      const response = await axios.get(`${API_BASE_URL}/topics`);
+      const response = await api.get('/topics');
       return response.data.topics || [];
     } catch (error) {
       console.error('Error fetching topics:', error);
@@ -17,7 +15,7 @@ export const topicService = {
   // Get videos for a specific topic
   async getVideosByTopic(topicName) {
     try {
-      const response = await axios.get(`${API_BASE_URL}/topics/${encodeURIComponent(topicName)}/videos`);
+      const response = await api.get(`/topics/${encodeURIComponent(topicName)}/videos`);
       return response.data.videos || [];
     } catch (error) {
       console.error(`Error fetching videos for topic ${topicName}:`, error);
@@ -28,8 +26,8 @@ export const topicService = {
   // Update a video's topic
   async updateVideoTopic(videoId, topicName) {
     try {
-      const response = await axios.put(
-        `${API_BASE_URL}/videos/${videoId}/topic`,
+      const response = await api.put(
+        `/videos/${videoId}/topic`,
         { topic_name: topicName }
       );
       return response.data;
@@ -61,7 +59,7 @@ export const topicService = {
   // Rename a topic
   async renameTopic(oldName, newName) {
     try {
-      const response = await axios.put(`${API_BASE_URL}/topics/rename`, {
+      const response = await api.put('/topics/rename', {
         old_name: oldName,
         new_name: newName
       });

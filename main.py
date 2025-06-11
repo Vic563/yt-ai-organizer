@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any, Callable, Awaitable
 import os
@@ -517,6 +518,36 @@ async def health_check():
 # Include API routes
 app.include_router(cost_router)
 app.include_router(performance_router)
+
+# Serve index.html at root or redirect to docs
+@app.get("/", include_in_schema=False)
+async def root():
+    """Serve SPA index or redirect to API docs."""
+    index_path = os.path.join(os.path.dirname(__file__), "dist", "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path, media_type="text/html")
+    return RedirectResponse(url="/api/docs")
+
+# Mount static files for frontend assets - serve built files from dist
+if os.path.exists("dist/assets"):
+    app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
+if os.path.exists("dist"):
+    app.mount("/dist", StaticFiles(directory="dist"), name="dist")
+
+# Legacy mounts for development (keep for compatibility)
+if os.path.exists("src"):
+    app.mount("/src", StaticFiles(directory="src"), name="src")
+if os.path.exists("public"):
+    app.mount("/public", StaticFiles(directory="public"), name="public")
+
+# Serve common frontend assets at root level
+@app.get("/vite.svg", include_in_schema=False)
+async def vite_svg():
+    """Serve vite.svg if it exists."""
+    svg_path = os.path.join(os.path.dirname(__file__), "vite.svg")
+    if os.path.exists(svg_path):
+        return FileResponse(svg_path, media_type="image/svg+xml")
+    raise HTTPException(404, "Not found")
 
 def _generate_markdown_export(messages: List[dict], title: str) -> str:
     """Generate markdown export of conversation"""

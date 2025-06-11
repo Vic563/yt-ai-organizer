@@ -86,10 +86,21 @@ def up(conn):
         )
     """)
     
+    # Create trigger for transcript inserts
+    cursor.execute("""
+        CREATE TRIGGER IF NOT EXISTS transcripts_after_insert_fts_update
+        AFTER INSERT ON transcripts
+        BEGIN
+            UPDATE videos_fts 
+            SET transcript = NEW.transcript_text
+            WHERE video_id = NEW.video_id;
+        END
+    """)
+
     # Create trigger for transcript updates
     cursor.execute("""
-        CREATE TRIGGER IF NOT EXISTS transcripts_fts_update
-        AFTER INSERT OR UPDATE ON transcripts
+        CREATE TRIGGER IF NOT EXISTS transcripts_after_update_fts_update
+        AFTER UPDATE ON transcripts
         BEGIN
             UPDATE videos_fts 
             SET transcript = NEW.transcript_text
@@ -137,7 +148,8 @@ def down(conn):
     cursor.execute("DROP TRIGGER IF EXISTS videos_fts_insert")
     cursor.execute("DROP TRIGGER IF EXISTS videos_fts_update")
     cursor.execute("DROP TRIGGER IF EXISTS videos_fts_delete")
-    cursor.execute("DROP TRIGGER IF EXISTS transcripts_fts_update")
+    cursor.execute("DROP TRIGGER IF EXISTS transcripts_after_insert_fts_update")
+    cursor.execute("DROP TRIGGER IF EXISTS transcripts_after_update_fts_update")
     
     # Drop FTS table
     cursor.execute("DROP TABLE IF EXISTS videos_fts")

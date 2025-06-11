@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react'
+import PropTypes from 'prop-types'
 import { Save, X, Eye, EyeOff, ExternalLink, CheckCircle, AlertCircle } from 'lucide-react'
 import { updateConfiguration, checkConfiguration, getAllVideos } from '../services/api'
+
+// Mask used to represent saved secrets
+const MASKED_VALUE = '••••••••••••••••'
 
 const ConfigPanel = ({ onClose, onConfigured }) => {
   const [config, setConfig] = useState({
@@ -26,8 +30,8 @@ const ConfigPanel = ({ onClose, onConfigured }) => {
       const response = await checkConfiguration()
       if (response.configured || response.keys) {
         setConfig({
-          googleAiApiKey: response.keys?.googleAiApiKey ? '••••••••••••••••' : '',
-          youtubeApiKey: response.keys?.youtubeApiKey ? '••••••••••••••••' : '',
+          googleAiApiKey: response.keys?.googleAiApiKey ? MASKED_VALUE : '',
+          youtubeApiKey: response.keys?.youtubeApiKey ? MASKED_VALUE : '',
           googleCloudProjectId: response.keys?.googleCloudProjectId || ''
         })
       }
@@ -77,17 +81,14 @@ const ConfigPanel = ({ onClose, onConfigured }) => {
     setStatus({ type: '', message: '' })
 
     try {
-      const MASKED_VALUE = '••••••••••••••••';
       // Only send non-masked values and non-empty values
       const configData = {
         googleAiApiKey: (config.googleAiApiKey && config.googleAiApiKey !== MASKED_VALUE) ? config.googleAiApiKey : null,
         youtubeApiKey: (config.youtubeApiKey && config.youtubeApiKey !== MASKED_VALUE) ? config.youtubeApiKey : null,
         googleCloudProjectId: config.googleCloudProjectId || null
-      };
-      console.log('Sending to backend /api/config/update:', configData);
+      }
       const response = await updateConfiguration(configData)
-      console.log('Update configuration response:', response);
-      
+
       if (response.success) {
         setStatus({ 
           type: 'success', 
@@ -170,6 +171,7 @@ const ConfigPanel = ({ onClose, onConfigured }) => {
               <button
                 type="button"
                 className="toggle-visibility"
+                aria-label={showKeys.googleAiApiKey ? 'Hide API key' : 'Show API key'}
                 onClick={() => toggleShowKey('googleAiApiKey')}
               >
                 {showKeys.googleAiApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -206,6 +208,7 @@ const ConfigPanel = ({ onClose, onConfigured }) => {
               <button
                 type="button"
                 className="toggle-visibility"
+                aria-label={showKeys.youtubeApiKey ? 'Hide API key' : 'Show API key'}
                 onClick={() => toggleShowKey('youtubeApiKey')}
               >
                 {showKeys.youtubeApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -287,6 +290,11 @@ const ConfigPanel = ({ onClose, onConfigured }) => {
       </form>
     </div>
   )
+}
+
+ConfigPanel.propTypes = {
+  onClose: PropTypes.func.isRequired,
+  onConfigured: PropTypes.func.isRequired,
 }
 
 export default ConfigPanel
