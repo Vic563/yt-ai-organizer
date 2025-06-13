@@ -196,6 +196,103 @@
   z-index: 1;
 }
 
+/* Modal Styles */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(2px);
+}
+
+.modal {
+  background: var(--bg-primary);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  width: 100%;
+  max-width: 400px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+}
+
+.modal-header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.modal-body {
+  padding: 1.5rem;
+  color: var(--text-primary);
+}
+
+.modal-body p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.text-sm {
+  font-size: 0.875rem;
+}
+
+.text-gray-500 {
+  color: var(--text-secondary);
+}
+
+.mt-2 {
+  margin-top: 0.5rem;
+}
+
+.modal-footer {
+  padding: 1rem 1.5rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.btn {
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 0.875rem;
+  border: 1px solid transparent;
+}
+
+.btn-secondary {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-hover);
+}
+
+.btn-danger {
+  background: var(--danger);
+  color: white;
+}
+
+.btn-danger:hover {
+  background: var(--danger-dark);
+}
+
 /* Dark mode adjustments */
 .dark .btn-back {
   background: linear-gradient(135deg, rgba(55, 65, 81, 0.5) 0%, rgba(31, 41, 55, 0.5) 100%);
@@ -211,6 +308,90 @@
 .dark .btn-back:hover {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3),
               0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Dark Mode Modal Text and Button Adjustments - Attempt 3 */
+
+/* --- HIGH-SPECIFICITY OVERRIDES FOR MODAL IN DARK MODE --- */
+[data-theme="dark"] .modal, .dark .modal {
+  background: #111827 !important;
+  border: 1px solid #334155 !important;
+}
+[data-theme="dark"] .modal-header h3, .dark .modal-header h3 {
+  color: #fff !important;
+  text-shadow: 0 1px 2px #0006;
+}
+[data-theme="dark"] .modal-body p, .dark .modal-body p {
+  color: #f1f5f9 !important;
+  text-shadow: 0 1px 2px #0006;
+}
+[data-theme="dark"] .modal-body p.text-sm.text-gray-500.mt-2, .dark .modal-body p.text-sm.text-gray-500.mt-2 {
+  color: #60a5fa !important;
+  text-shadow: 0 1px 2px #0008;
+}
+[data-theme="dark"] .modal-footer, .dark .modal-footer {
+  background: #1e293b !important;
+  border-top: 1px solid #334155 !important;
+}
+[data-theme="dark"] .modal-footer .btn-secondary, .dark .modal-footer .btn-secondary {
+  background: #334155 !important;
+  color: #fff !important;
+  border: 1px solid #475569 !important;
+}
+[data-theme="dark"] .modal-footer .btn-secondary:hover, .dark .modal-footer .btn-secondary:hover {
+  background: #475569 !important;
+}
+[data-theme="dark"] .modal-footer .btn-danger, .dark .modal-footer .btn-danger {
+  background: #ef4444 !important;
+  color: #fff !important;
+  border: 1px solid #991b1b !important;
+}
+[data-theme="dark"] .modal-footer .btn-danger:hover, .dark .modal-footer .btn-danger:hover {
+  background: #991b1b !important;
+}
+/* --- END HIGH-SPECIFICITY OVERRIDES --- */
+.dark .modal {
+  background-color: #1e293b; /* Explicit modal background for dark mode */
+  border: 1px solid #334155;
+}
+
+.dark .modal-header h3 {
+  color: #e2e8f0; /* Very light gray, almost white */
+}
+
+.dark .modal-body p {
+  color: #e2e8f0; /* Main paragraph text: very light gray */
+}
+
+/* More specific selector for the secondary descriptive text */
+.dark .modal-body p.text-sm.text-gray-500.mt-2 {
+  color: #94a3b8 !important; /* Lighter than default text-secondary, using !important as a last resort if needed */
+}
+
+/* Modal Buttons in Dark Mode */
+.dark .modal-footer {
+  background-color: #283447; /* Slightly lighter than modal body for footer */
+  border-top: 1px solid #334155;
+}
+
+.dark .modal-footer .btn-secondary {
+  background-color: #3b4b61; /* A noticeable but dark button background */
+  color: #e2e8f0;           /* Light text for the button */
+  border: 1px solid #4a5c75;
+}
+
+.dark .modal-footer .btn-secondary:hover {
+  background-color: #4a5c75; /* Lighter on hover */
+}
+
+.dark .modal-footer .btn-danger {
+  background-color: #b91c1c; /* A darker, richer red for dark mode */
+  color: #f1f5f9;           /* Light text */
+  border: 1px solid #991b1b;
+}
+
+.dark .modal-footer .btn-danger:hover {
+  background-color: #991b1b; /* Darken further on hover */
 }
 
 .page-header {
